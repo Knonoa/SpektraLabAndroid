@@ -106,6 +106,8 @@ void cam16_setup_srgb(Cam16Setup& out) {
     out.A_w = (2.0 * rgb_aw[0] + 1.0 * rgb_aw[1] + (1.0 / 20.0) * rgb_aw[2] - 0.305) * out.N_bb;
     out.c = kCam16c;
     out.N_c = kCam16Nc;
+    out.e_c = std::pow(1.64 - std::pow(0.29, out.n), 0.73);
+    out.F_L_4 = std::pow(out.F_L, 0.25);
 
     double jab_w[3];
     xyz_to_cam16ucs(out, xyz_w, jab_w);
@@ -164,9 +166,8 @@ void xyz_to_cam16ucs(const Cam16Setup& st, const double xyz_in[3], double jab[3]
     double t = 0.0;
     if (den != 0.0)
         t = (50000.0 / 13.0 * st.N_c * st.N_cb * e_t * std::sqrt(a * a + b * b)) / den;
-    const double e_c = std::pow(1.64 - std::pow(0.29, st.n), 0.73);
-    const double C = t > 0.0 ? std::pow(t, 0.9) * std::sqrt(std::fabs(J) / 100.0) * e_c : 0.0;
-    const double M = C * std::pow(st.F_L, 0.25);
+    const double C = t > 0.0 ? std::pow(t, 0.9) * std::sqrt(std::fabs(J) / 100.0) * st.e_c : 0.0;
+    const double M = C * st.F_L_4;
 
     const double Mp = (1.0 / 0.0228) * std::log(1.0 + 0.0228 * M);
     jab[0] = 1.7 * J / (1.0 + 0.007 * J);
@@ -181,9 +182,8 @@ void cam16ucs_to_xyz(const Cam16Setup& st, const double jab[3], double xyz_out[3
 
     const double M = (std::exp(Mp * 0.0228) - 1.0) / 0.0228;
     const double J = Jp / (1.7 - 0.007 * Jp);
-    const double C = M / std::pow(st.F_L, 0.25);
-
-    const double e_c = std::pow(1.64 - std::pow(0.29, st.n), 0.73);
+    const double C = M / st.F_L_4;
+    const double e_c = st.e_c;
     const double A = st.A_w * spow(J / 100.0, 1.0 / (st.c * st.z));
     const double sq = std::sqrt(std::fabs(J) / 100.0);
     const double t = (sq > 0.0 && C > 0.0) ? std::pow(C / (sq * e_c), 1.0 / 0.9) : 0.0;

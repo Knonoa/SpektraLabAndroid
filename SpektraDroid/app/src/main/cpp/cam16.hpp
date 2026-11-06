@@ -36,6 +36,7 @@ struct Cam16Setup {
     double D_rgb[3] = {1, 1, 1};
     Mat3 m_to_xyz, m_to_rgb;  // linear sRGB <-> XYZ, D65
     double white_Jp = 0.0;
+    double e_c = 1.0, F_L_4 = 1.0;  // pow(1.64 - 0.29^n, 0.73), F_L^0.25 (cached)
     double l_grid[kCmaxNL];
     double h_grid[kCmaxNH];
     std::vector<float> c_max_table;  // kCmaxNL * kCmaxNH, row-major

@@ -51,7 +51,8 @@ void fir_gaussian(const float* in, float* out, int w, int h, double sigma, doubl
 void iir_gaussian(const float* in, float* out, int w, int h, double sigma);
 
 inline void gaussian_blur_plane(const float* in, float* out, int w, int h, double sigma) {
-    if (sigma <= 0.0) {
+    // sigma <= 0, or a FIR kernel of radius 0 (sigma < 1/6): the identity
+    if (sigma <= 0.0 || (sigma < 3.0 && (int)(3.0 * sigma + 0.5) == 0)) {
         if (out != in) std::copy(in, in + (size_t)w * h, out);
         return;
     }
@@ -113,30 +114,48 @@ struct Rng {
     double spare = 0.0;
     bool has_spare = false;
 
+    // Poisson: exact multiplication method for small means, normal
+    // approximation (continuity-corrected) above 30 where it is accurate to
+    // well under the grain's own sampling noise.
     long poisson(double lambda) {
-        if (lambda <= 0.0) return 0;
+        if (!(lambda > 0.0)) return 0;
         if (lambda < 30.0) {
-            double L = std::exp(-lambda);
+            const double L = std::exp(-lambda);
             long k = 0;
-            double p = 1.0;
-            do {
+            double p = uniform();
+            while (p > L) {
                 k++;
                 p *= uniform();
-            } while (p > L);
-            return k - 1;
-        }
-        return (long)std::lround(lambda + std::sqrt(lambda) * normal());
-    }
-    long binomial(long n, double p) {
-        if (n <= 0 || p <= 0.0) return 0;
-        if (p >= 1.0) return n;
-        double mean = n * p, var = mean * (1.0 - p);
-        if (n <= 30 || var < 9.0) {
-            long k = 0;
-            for (long i = 0; i < n; i++) if (uniform() < p) k++;
+            }
             return k;
         }
-        return (long)std::lround(mean + std::sqrt(var) * normal());
+        const double v = std::floor(lambda + std::sqrt(lambda) * normal() + 0.5);
+        return v < 0.0 ? 0 : (long)v;
+    }
+    // Binomial: geometric-skip inversion while n*min(p,1-p) is small
+    // (expected n*p + 1 steps -- the old per-trial loop cost n uniforms per
+    // pixel in every shadow), normal approximation once the variance is >= 9.
+    long binomial(long n, double p) {
+        if (n <= 0 || !(p > 0.0)) return 0;
+        if (p >= 1.0) return n;
+        if (p > 0.5) return n - binomial(n, 1.0 - p);
+        const double mean = n * p;
+        const double var = mean * (1.0 - p);
+        if (var < 9.0 || n < 30) {
+            const double log_q = std::log1p(-p);
+            long x = 0, sum = 0;
+            for (;;) {
+                const double u = std::max(uniform(), 1e-300);
+                sum += (long)std::floor(std::log(u) / log_q) + 1;
+                if (sum > n) break;
+                x++;
+            }
+            return x;
+        }
+        double v = std::floor(mean + std::sqrt(var) * normal() + 0.5);
+        if (v < 0.0) v = 0.0;
+        if (v > (double)n) v = (double)n;
+        return (long)v;
     }
     // Lognormal with linear-space mean and standard deviation, matching
     // spektrafilm.utils.fast_lognormal_from_mean_std. The previous helper

@@ -38,10 +38,10 @@ public:
         const int chunks = std::min(threads, std::max(1, n / min_chunk));
         {
             std::lock_guard<std::mutex> lk(m_);
-            job_ = &job;
-            n_ = n;
-            chunks_ = chunks;
-            next_.store(0);
+            job_.store(&job);
+            n_.store(n);
+            chunks_.store(chunks);
+            next_.store(0);   // publishes the three stores above to work()
             pending_ = chunks;
             generation_++;
         }
@@ -49,7 +49,7 @@ public:
         work();
         std::unique_lock<std::mutex> lk(m_);
         done_cv_.wait(lk, [&] { return pending_ == 0; });
-        job_ = nullptr;
+        job_.store(nullptr);
     }
 
 private:
@@ -71,11 +71,15 @@ private:
     void work() {
         in_job_ = true;
         for (;;) {
-            int c = next_.fetch_add(1);
-            if (c >= chunks_) break;
-            int b = (int)((long long)n_ * c / chunks_);
-            int e = (int)((long long)n_ * (c + 1) / chunks_);
-            (*job_)(b, e);
+            const int c = next_.fetch_add(1);
+            const int chunks = chunks_.load();
+            if (c >= chunks) break;
+            const auto* job = job_.load();
+            if (!job) break;
+            const int n = n_.load();
+            const int b = (int)((long long)n * c / chunks);
+            const int e = (int)((long long)n * (c + 1) / chunks);
+            (*job)(b, e);
             std::lock_guard<std::mutex> lk(m_);
             if (--pending_ == 0) done_cv_.notify_all();
         }
@@ -90,7 +94,7 @@ private:
                 cv_.wait(lk, [&] { return stop_ || generation_ != seen; });
                 if (stop_) return;
                 seen = generation_;
-                if (!job_) continue;
+                if (!job_.load()) continue;
             }
             work();
         }
@@ -99,8 +103,9 @@ private:
     std::vector<std::thread> workers_;
     std::mutex m_, run_mutex_;
     std::condition_variable cv_, done_cv_;
-    const std::function<void(int, int)>* job_ = nullptr;
-    int n_ = 0, chunks_ = 0, pending_ = 0;
+    std::atomic<const std::function<void(int, int)>*> job_{nullptr};
+    std::atomic<int> n_{0}, chunks_{0};
+    int pending_ = 0;   // guarded by m_
     std::atomic<int> next_{0};
     unsigned generation_ = 0;
     bool stop_ = false;

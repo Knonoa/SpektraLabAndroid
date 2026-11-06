@@ -1,73 +1,111 @@
-// jni_bridge.cpp -- the JNI surface for Kotlin.
-#include <jni.h>
+// jni_bridge.cpp -- the JNI surface for Kotlin (com.spektralab.android.engine.SpektraNative).
+//
+// One process-wide EngineContext (baked data + CAM16 tables) and any number
+// of engine handles: the app keeps one for the interactive preview (whose
+// cached negative makes print-side edits cheap) and one for export.
+//
+// Cancellation: every render carries a token; nativeSetWanted() publishes the
+// token of the newest request, and a running render whose token is no longer
+// wanted aborts at its next stage boundary.
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
 #include <android/bitmap.h>
+#include <android/log.h>
+#include <jni.h>
 
+#include <atomic>
 #include <cstring>
+#include <mutex>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include "spektra_engine.hpp"
 
 using namespace spk;
 
+#define LOG_TAG "SpektraNative"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+
 namespace {
 
-// Read the whole engine.bin asset into memory once.
-std::vector<uint8_t>& asset_buffer() {
-    static std::vector<uint8_t> buf;
-    return buf;
-}
+struct Handle {
+    explicit Handle(EngineContext& ctx) : engine(ctx.data, ctx.cam16) {}
+    Engine engine;
+    std::mutex mutex;
+    std::atomic<int64_t> wanted{0};
+    // linear-light copy of the last source bitmap
+    int64_t lin_id = -1;
+    int lin_w = 0, lin_h = 0;
+    std::vector<float> lin;
+};
 
-bool ensure_context(std::string& err) {
-    EngineContext& ctx = EngineContext::instance();
-    if (ctx.error.empty() && ctx.data.films.empty()) {
-        ctx.error = "engine data not loaded";
+std::string json_escape(const std::string& s) {
+    std::string o;
+    for (char c : s) {
+        if (c == '"' || c == '\\') { o += '\\'; o += c; }
+        else if ((unsigned char)c < 0x20) o += ' ';
+        else o += c;
     }
-    if (!ctx.data.films.empty()) return true;
-    err = ctx.error.empty() ? "engine data not loaded" : ctx.error;
-    return false;
+    return o;
 }
 
-RenderParams params_from(JNIEnv* env, jobject jparams, const char*& err) {
-    RenderParams p;
-    jclass cls = env->GetObjectClass(jparams);
+jstring jstr(JNIEnv* env, const std::string& s) { return env->NewStringUTF(s.c_str()); }
 
-    auto get_str = [&](const char* name) -> std::string {
-        jfieldID fid = env->GetFieldID(cls, name, "Ljava/lang/String;");
-        if (!fid) return {};
-        auto s = (jstring)env->GetObjectField(jparams, fid);
+RenderParams params_from(JNIEnv* env, jobject jp) {
+    RenderParams p;
+    jclass cls = env->GetObjectClass(jp);
+    auto S = [&](const char* n) -> std::string {
+        jfieldID f = env->GetFieldID(cls, n, "Ljava/lang/String;");
+        if (!f) { env->ExceptionClear(); return {}; }
+        auto s = (jstring)env->GetObjectField(jp, f);
         if (!s) return {};
-        const char* chars = env->GetStringUTFChars(s, nullptr);
-        std::string out(chars);
-        env->ReleaseStringUTFChars(s, chars);
+        const char* c = env->GetStringUTFChars(s, nullptr);
+        std::string out(c);
+        env->ReleaseStringUTFChars(s, c);
+        env->DeleteLocalRef(s);
         return out;
     };
-    auto get_f = [&](const char* name) -> float {
-        jfieldID fid = env->GetFieldID(cls, name, "F");
-        return fid ? env->GetFloatField(jparams, fid) : 0.0f;
+    auto F = [&](const char* n, float def) -> float {
+        jfieldID f = env->GetFieldID(cls, n, "F");
+        if (!f) { env->ExceptionClear(); return def; }
+        return env->GetFloatField(jp, f);
     };
-    auto get_z = [&](const char* name) -> bool {
-        jfieldID fid = env->GetFieldID(cls, name, "Z");
-        return fid ? env->GetBooleanField(jparams, fid) != JNI_FALSE : false;
+    auto Z = [&](const char* n, bool def) -> bool {
+        jfieldID f = env->GetFieldID(cls, n, "Z");
+        if (!f) { env->ExceptionClear(); return def; }
+        return env->GetBooleanField(jp, f) != JNI_FALSE;
     };
-
-    p.film_stock = get_str("filmStock");
-    p.print_stock = get_str("printStock");
-    p.exposure_ev = get_f("exposureEv");
-    p.y_filter_shift = get_f("yFilterShift");
-    p.m_filter_shift = get_f("mFilterShift");
-    p.c_filter_shift = get_f("cFilterShift");
-    p.print_exposure = get_f("printExposure");
-    p.film_format_mm = get_f("filmFormatMm");
-    p.grain_amount = get_f("grainAmount");
-    p.halation_amount = get_f("halationAmount");
-    p.scatter_amount = get_f("scatterAmount");
-    p.auto_exposure = get_z("autoExposure");
-
-    if (p.print_exposure <= 0.0f) p.print_exposure = 1.0f;
-    if (p.film_format_mm <= 0.0f) p.film_format_mm = 35.0f;
-    err = nullptr;
+    auto J = [&](const char* n, int64_t def) -> int64_t {
+        jfieldID f = env->GetFieldID(cls, n, "J");
+        if (!f) { env->ExceptionClear(); return def; }
+        return env->GetLongField(jp, f);
+    };
+    p.film_stock = S("filmStock");
+    p.print_stock = S("printStock");
+    p.scan_film = Z("scanFilm", false);
+    p.exposure_ev = F("exposureEv", 0.0f);
+    p.auto_exposure = Z("autoExposure", true);
+    p.film_format_mm = F("filmFormatMm", 35.0f);
+    p.halation_active = Z("halationActive", true);
+    p.halation_amount = F("halationAmount", 1.0f);
+    p.scatter_amount = F("scatterAmount", 1.0f);
+    p.dir_couplers_active = Z("couplersActive", true);
+    p.dir_couplers_amount = F("couplersAmount", 1.0f);
+    p.grain_active = Z("grainActive", true);
+    p.grain_sublayers = Z("grainSublayers", true);
+    p.grain_amount = F("grainAmount", 1.0f);
+    p.print_exposure = F("printExposure", 1.0f);
+    p.y_filter_shift = F("yFilterShift", 0.0f);
+    p.m_filter_shift = F("mFilterShift", 0.0f);
+    p.print_exposure_compensation = Z("printExposureCompensation", false);
+    p.glare_active = Z("glareActive", true);
+    p.glare_amount = F("glareAmount", 1.0f);
+    p.unsharp_mask = Z("unsharpMask", true);
+    p.seed = (uint64_t)J("seed", 0);
+    env->DeleteLocalRef(cls);
+    if (!(p.print_exposure > 0.0f)) p.print_exposure = 1.0f;
+    if (!(p.film_format_mm > 0.0f)) p.film_format_mm = 35.0f;
     return p;
 }
 
@@ -75,111 +113,145 @@ RenderParams params_from(JNIEnv* env, jobject jparams, const char*& err) {
 
 extern "C" {
 
-JNIEXPORT jboolean JNICALL
-Java_com_spektralab_android_engine_SpektraNative_nativeLoadEngineData(
-        JNIEnv* env, jobject, jobject assetManager) {
+JNIEXPORT jstring JNICALL
+Java_com_spektralab_android_engine_SpektraNative_nativeInit(JNIEnv* env, jobject, jobject assetManager) {
+    EngineContext& ctx = EngineContext::instance();
+    if (ctx.ready) return nullptr;
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
     AAsset* asset = AAssetManager_open(mgr, "engine/engine.bin", AASSET_MODE_BUFFER);
-    if (!asset) return JNI_FALSE;
-    size_t size = (size_t)AAsset_getLength(asset);
-    auto& buf = asset_buffer();
-    buf.resize(size);
-    AAsset_read(asset, buf.data(), size);
-    AAsset_close(asset);
-
-    EngineContext& ctx = EngineContext::instance();
-    bool ok = ctx.init(buf.data(), buf.size());
-    if (ok && !ctx.cam16_ready) {
-        cam16_setup_srgb(ctx.cam16);
-        ctx.cam16_ready = true;
-    }
-    return ok ? JNI_TRUE : JNI_FALSE;
-}
-
-JNIEXPORT jobjectArray JNICALL
-Java_com_spektralab_android_engine_SpektraNative_nativeListFilms(JNIEnv* env, jobject) {
-    EngineContext& ctx = EngineContext::instance();
-    std::string err;
-    if (!ensure_context(err)) return nullptr;
-    const auto& films = ctx.data.films;
-    jobjectArray arr = env->NewObjectArray((jsize)films.size() * 2,
-                                           env->FindClass("java/lang/String"), nullptr);
-    for (jsize i = 0; i < (jsize)films.size(); i++) {
-        env->SetObjectArrayElement(arr, i * 2, env->NewStringUTF(films[i].stock.c_str()));
-        env->SetObjectArrayElement(arr, i * 2 + 1, env->NewStringUTF(films[i].name.c_str()));
-    }
-    return arr;
-}
-
-JNIEXPORT jobjectArray JNICALL
-Java_com_spektralab_android_engine_SpektraNative_nativeListPapers(JNIEnv* env, jobject) {
-    EngineContext& ctx = EngineContext::instance();
-    std::string err;
-    if (!ensure_context(err)) return nullptr;
-    const auto& papers = ctx.data.papers;
-    jobjectArray arr = env->NewObjectArray((jsize)papers.size() * 2,
-                                           env->FindClass("java/lang/String"), nullptr);
-    for (jsize i = 0; i < (jsize)papers.size(); i++) {
-        env->SetObjectArrayElement(arr, i * 2, env->NewStringUTF(papers[i].stock.c_str()));
-        env->SetObjectArrayElement(arr, i * 2 + 1, env->NewStringUTF(papers[i].name.c_str()));
-    }
-    return arr;
-}
-
-JNIEXPORT jboolean JNICALL
-Java_com_spektralab_android_engine_SpektraNative_nativeRender(
-        JNIEnv* env, jobject, jobject bitmapIn, jobject bitmapOut, jobject jparams) {
-    std::string err;
-    EngineContext& ctx = EngineContext::instance();
-    if (!ensure_context(err)) return JNI_FALSE;
-
-    AndroidBitmapInfo infoIn, infoOut;
-    if (AndroidBitmap_getInfo(env, bitmapIn, &infoIn) != ANDROID_BITMAP_RESULT_SUCCESS)
-        return JNI_FALSE;
-    if (AndroidBitmap_getInfo(env, bitmapOut, &infoOut) != ANDROID_BITMAP_RESULT_SUCCESS)
-        return JNI_FALSE;
-    if (infoIn.width != infoOut.width || infoIn.height != infoOut.height) return JNI_FALSE;
-    if (infoIn.format != ANDROID_BITMAP_FORMAT_RGBA_8888 ||
-        infoOut.format != ANDROID_BITMAP_FORMAT_RGBA_8888) return JNI_FALSE;
-
-    void* pxIn = nullptr;
-    void* pxOut = nullptr;
-    if (AndroidBitmap_lockPixels(env, bitmapIn, &pxIn) != ANDROID_BITMAP_RESULT_SUCCESS)
-        return JNI_FALSE;
-    if (AndroidBitmap_lockPixels(env, bitmapOut, &pxOut) != ANDROID_BITMAP_RESULT_SUCCESS) {
-        AndroidBitmap_unlockPixels(env, bitmapIn);
-        return JNI_FALSE;
-    }
-
-    const char* perr = nullptr;
-    RenderParams p = params_from(env, jparams, perr);
-    Engine engine(ctx.data, ctx.cam16, p);
-
-    // The bitmaps are ARGB_8888 which on Android is RGBA in memory (little
-    // endian); row stride may exceed width*4.
-    bool ok = false;
-    if (infoIn.stride == (uint32_t)(infoIn.width * 4) &&
-        infoOut.stride == (uint32_t)(infoOut.width * 4)) {
-        ok = engine.render((const uint8_t*)pxIn, infoIn.width, infoIn.height,
-                           (uint8_t*)pxOut, err);
+    if (!asset) return jstr(env, "engine.bin missing from assets");
+    const size_t size = (size_t)AAsset_getLength(asset);
+    const void* buf = AAsset_getBuffer(asset);
+    bool ok;
+    if (buf) {
+        ok = ctx.init((const uint8_t*)buf, size);
     } else {
-        // copy into tight buffers
-        size_t np = (size_t)infoIn.width * infoIn.height;
-        std::vector<uint8_t> tin(np * 4), tout(np * 4);
-        for (uint32_t y = 0; y < infoIn.height; y++) {
-            std::memcpy(tin.data() + (size_t)y * infoIn.width * 4,
-                        (uint8_t*)pxIn + (size_t)y * infoIn.stride, (size_t)infoIn.width * 4);
+        std::vector<uint8_t> tmp(size);
+        AAsset_read(asset, tmp.data(), size);
+        ok = ctx.init(tmp.data(), size);
+    }
+    AAsset_close(asset);
+    if (!ok) return jstr(env, ctx.error.empty() ? "engine init failed" : ctx.error);
+    LOGI("engine ready: %zu films, %zu papers", ctx.data.films.size(), ctx.data.papers.size());
+    return nullptr;
+}
+
+// {"films":[{"stock","name","positive","bw","cine","target"}...],"papers":[...]}
+JNIEXPORT jstring JNICALL
+Java_com_spektralab_android_engine_SpektraNative_nativeCatalog(JNIEnv* env, jobject) {
+    EngineContext& ctx = EngineContext::instance();
+    if (!ctx.ready) return jstr(env, "{}");
+    std::ostringstream o;
+    o << "{\"films\":[";
+    for (size_t i = 0; i < ctx.data.films.size(); i++) {
+        const auto& f = ctx.data.films[i];
+        o << (i ? "," : "") << "{\"stock\":\"" << json_escape(f.stock) << "\",\"name\":\""
+          << json_escape(f.name) << "\",\"positive\":" << (f.positive ? "true" : "false")
+          << ",\"bw\":" << (f.bw ? "true" : "false") << ",\"cine\":" << (f.cine ? "true" : "false")
+          << ",\"target\":\"" << json_escape(f.target_print) << "\"}";
+    }
+    o << "],\"papers\":[";
+    for (size_t i = 0; i < ctx.data.papers.size(); i++) {
+        const auto& p = ctx.data.papers[i];
+        o << (i ? "," : "") << "{\"stock\":\"" << json_escape(p.stock) << "\",\"name\":\""
+          << json_escape(p.name) << "\",\"bw\":" << (p.bw ? "true" : "false")
+          << ",\"cine\":" << (p.cine ? "true" : "false") << "}";
+    }
+    o << "]}";
+    return jstr(env, o.str());
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_spektralab_android_engine_SpektraNative_nativeCreate(JNIEnv*, jobject) {
+    EngineContext& ctx = EngineContext::instance();
+    if (!ctx.ready) return 0;
+    return (jlong) new Handle(ctx);
+}
+
+JNIEXPORT void JNICALL
+Java_com_spektralab_android_engine_SpektraNative_nativeDestroy(JNIEnv*, jobject, jlong h) {
+    auto* handle = (Handle*)h;
+    if (!handle) return;
+    handle->wanted.store(-1);
+    { std::lock_guard<std::mutex> lk(handle->mutex); }
+    delete handle;
+}
+
+JNIEXPORT void JNICALL
+Java_com_spektralab_android_engine_SpektraNative_nativeSetWanted(JNIEnv*, jobject, jlong h, jlong token) {
+    auto* handle = (Handle*)h;
+    if (handle) handle->wanted.store(token);
+}
+
+JNIEXPORT void JNICALL
+Java_com_spektralab_android_engine_SpektraNative_nativeDropCaches(JNIEnv*, jobject, jlong h) {
+    auto* handle = (Handle*)h;
+    if (!handle) return;
+    std::lock_guard<std::mutex> lk(handle->mutex);
+    handle->engine.drop_caches();
+    handle->lin_id = -1;
+    std::vector<float>().swap(handle->lin);
+}
+
+// Returns null on success, "cancelled", or an error message.
+JNIEXPORT jstring JNICALL
+Java_com_spektralab_android_engine_SpektraNative_nativeRender(
+        JNIEnv* env, jobject, jlong h, jobject bitmapIn, jlong sourceId, jobject bitmapOut,
+        jobject jparams, jlong token) {
+    auto* handle = (Handle*)h;
+    if (!handle) return jstr(env, "engine not created");
+    const RenderParams p = params_from(env, jparams);
+    std::lock_guard<std::mutex> lk(handle->mutex);
+    if (handle->wanted.load() != token) return jstr(env, "cancelled");
+
+    AndroidBitmapInfo in{}, out{};
+    if (AndroidBitmap_getInfo(env, bitmapIn, &in) != ANDROID_BITMAP_RESULT_SUCCESS ||
+        AndroidBitmap_getInfo(env, bitmapOut, &out) != ANDROID_BITMAP_RESULT_SUCCESS)
+        return jstr(env, "bitmap info failed");
+    if (in.width != out.width || in.height != out.height) return jstr(env, "bitmap size mismatch");
+    if (in.format != ANDROID_BITMAP_FORMAT_RGBA_8888 || out.format != ANDROID_BITMAP_FORMAT_RGBA_8888)
+        return jstr(env, "bitmaps must be ARGB_8888");
+    const int w = (int)in.width, hgt = (int)in.height;
+
+    try {
+        if (handle->lin_id != sourceId || handle->lin_w != w || handle->lin_h != hgt || sourceId < 0) {
+            void* px = nullptr;
+            if (AndroidBitmap_lockPixels(env, bitmapIn, &px) != ANDROID_BITMAP_RESULT_SUCCESS)
+                return jstr(env, "lock input failed");
+            handle->lin.resize((size_t)w * hgt * 3);
+            srgb8_to_linear((const uint8_t*)px, w, hgt, in.stride, handle->lin.data());
+            AndroidBitmap_unlockPixels(env, bitmapIn);
+            handle->lin_id = sourceId;
+            handle->lin_w = w;
+            handle->lin_h = hgt;
         }
-        ok = engine.render(tin.data(), infoIn.width, infoIn.height, tout.data(), err);
-        for (uint32_t y = 0; y < infoOut.height; y++) {
-            std::memcpy((uint8_t*)pxOut + (size_t)y * infoOut.stride,
-                        tout.data() + (size_t)y * infoOut.width * 4, (size_t)infoOut.width * 4);
-        }
+    } catch (const std::bad_alloc&) {
+        handle->lin_id = -1;
+        return jstr(env, "out of memory");
     }
 
-    AndroidBitmap_unlockPixels(env, bitmapIn);
+    std::vector<uint8_t> tight;
+    void* po = nullptr;
+    if (AndroidBitmap_lockPixels(env, bitmapOut, &po) != ANDROID_BITMAP_RESULT_SUCCESS)
+        return jstr(env, "lock output failed");
+    uint8_t* dst = (uint8_t*)po;
+    const bool strided = out.stride != (uint32_t)w * 4;
+    if (strided) {
+        tight.resize((size_t)w * hgt * 4);
+        dst = tight.data();
+    }
+    Handle* hd = handle;
+    const int64_t tok = token;
+    CancelFn cancel = [hd, tok] { return hd->wanted.load(std::memory_order_relaxed) != tok; };
+    std::string err;
+    const bool ok = handle->engine.render(handle->lin.data(), w, hgt, sourceId, p, dst, err, &cancel);
+    if (ok && strided) {
+        for (int y = 0; y < hgt; y++)
+            std::memcpy((uint8_t*)po + (size_t)y * out.stride, tight.data() + (size_t)y * w * 4, (size_t)w * 4);
+    }
     AndroidBitmap_unlockPixels(env, bitmapOut);
-    return ok ? JNI_TRUE : JNI_FALSE;
+    if (!ok) return jstr(env, err);
+    return nullptr;
 }
 
 }  // extern "C"

@@ -59,8 +59,8 @@ constexpr double kUnsharpAmount = 0.7;
 
 struct Cancelled {};
 
-inline void check_cancel(const std::atomic<int>* c) {
-    if (c && c->load(std::memory_order_relaxed) != 0) throw Cancelled{};
+inline void check_cancel(const CancelFn* c) {
+    if (c && *c && (*c)()) throw Cancelled{};
 }
 
 inline float srgb_encode(float v) {
@@ -682,7 +682,7 @@ struct Engine::Impl {
 
     // -- filming.expose ---------------------------------------------------
     void expose(const float* rgb, int w, int h, const RenderParams& p, double pixel_um,
-                float* ch[3], const std::atomic<int>* cancel, const TapFn& tap) {
+                float* ch[3], const CancelFn* cancel, const TapFn& tap) {
         const FilmProfile& f = *film->film;
         const size_t np = (size_t)w * h;
         const double ae = p.auto_exposure ? auto_exposure_ev(rgb, w, h) : 0.0;
@@ -752,7 +752,7 @@ struct Engine::Impl {
 
     // -- filming.develop (model/develop.develop) -----------------------------
     void develop(int w, int h, const RenderParams& p, double pixel_um, float* ch[3],
-                 const std::atomic<int>* cancel, const TapFn& tap) {
+                 const CancelFn* cancel, const TapFn& tap) {
         const size_t np = (size_t)w * h;
         const FilmProfile& f = *film->film;
         // density_cmy = develop_simple(log_raw, le, normalized curves)
@@ -819,7 +819,7 @@ struct Engine::Impl {
 
     // -- model/grain.apply_grain ---------------------------------------------
     void grain(int w, int h, const RenderParams& p, double pixel_um, float* ch[3],
-               const std::atomic<int>* cancel) {
+               const CancelFn* cancel) {
         const size_t np = (size_t)w * h;
         const double pixel_area = pixel_um * pixel_um;
         const uint64_t seed = p.seed ^ 0x6772616E5F5F5F5Full;
@@ -930,7 +930,7 @@ struct Engine::Impl {
 
     // -- scanning.scan ---------------------------------------------------------
     void scan_stage(int w, int h, const RenderParams& p, float* ch[3], uint8_t* out,
-                    const std::atomic<int>* cancel, const TapFn& tap) {
+                    const CancelFn* cancel, const TapFn& tap) {
         const size_t np = (size_t)w * h;
         // model/glare.add_glare (print scans only)
         std::vector<float> glare;
@@ -1011,7 +1011,7 @@ struct Engine::Impl {
     }
 
     void render(const float* rgb, int w, int h, int64_t source_id, const RenderParams& p,
-                uint8_t* out, const std::atomic<int>* cancel, const TapFn& tap) {
+                uint8_t* out, const CancelFn* cancel, const TapFn& tap) {
         setup(p);
         check_cancel(cancel);
         const size_t np = (size_t)w * h;
@@ -1057,7 +1057,7 @@ void Engine::drop_caches() {
 
 bool Engine::render(const float* rgb_linear, int w, int h, int64_t source_id,
                     const RenderParams& params, uint8_t* rgba_out, std::string& error,
-                    const std::atomic<int>* cancel, const TapFn& tap) {
+                    const CancelFn* cancel, const TapFn& tap) {
     if (w <= 0 || h <= 0) { error = "empty image"; return false; }
     try {
         impl_->render(rgb_linear, w, h, source_id, params, rgba_out, cancel, tap);

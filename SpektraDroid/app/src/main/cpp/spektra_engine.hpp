@@ -73,6 +73,8 @@ struct RenderParams {
 // Planes are planar float (r, g, b), w*h each.
 using TapFn = std::function<void(const char* tap, const float* r, const float* g,
                                  const float* b, int w, int h)>;
+// Polled between stages; returning true aborts the render ("cancelled").
+using CancelFn = std::function<bool()>;
 
 class Engine {
 public:
@@ -83,10 +85,10 @@ public:
     // `source_id` identifies the pixels: with the same id, size and
     // film-side params the developed negative is reused, so print-side edits
     // (paper, enlarger filters, print exposure, glare) skip filming.
-    // `cancel` (optional) aborts between stages when it becomes non-zero.
+    // `cancel` (optional) is polled between stages; true aborts the render.
     bool render(const float* rgb_linear, int w, int h, int64_t source_id,
                 const RenderParams& params, uint8_t* rgba_out,
-                std::string& error, const std::atomic<int>* cancel = nullptr,
+                std::string& error, const CancelFn* cancel = nullptr,
                 const TapFn& tap = nullptr);
 
     // Frees the cached negative (call on memory pressure / new photo).

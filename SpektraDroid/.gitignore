@@ -1,0 +1,18 @@
+# Gradle and Android build output
+.gradle/
+.kotlin/
+**/build/
+**/.cxx/
+
+# Local machine configuration
+local.properties
+
+# IDE metadata
+.idea/
+*.iml
+.DS_Store
+
+# Generated APKs and mapping files
+*.apk
+*.aab
+*.mapping

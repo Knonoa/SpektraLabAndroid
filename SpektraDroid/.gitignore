@@ -16,3 +16,6 @@ local.properties
 *.apk
 *.aab
 *.mapping
+
+# Python caches (tools/)
+__pycache__/

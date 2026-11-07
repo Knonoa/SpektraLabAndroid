@@ -1,5 +1,6 @@
 #include "raw_decoder.hpp"
 #include "raw_headroom.hpp"
+#include "raw_resample.hpp"
 
 #include <libraw/libraw.h>
 
@@ -31,7 +32,11 @@ bool libraw_ok(int status, const char* stage, std::string& error) {
 
 bool supported_compression(LibRaw& raw, std::string& error) {
     const char* decoder = raw.unpack_function_name();
-    if (decoder && std::strstr(decoder, "nikon_he_load_raw") != nullptr) {
+    // LibRaw 0.22.x exposes the Nikon HE/HE* decoder name but deliberately
+    // rejects those files.  0.23.0 adds the actual three-pass decoder; keep
+    // the guard for the pinned legacy build while allowing the new decoder.
+    if (decoder && std::strstr(decoder, "nikon_he_load_raw") != nullptr &&
+        LibRaw::versionNumber() < LIBRAW_MAKE_VERSION(0, 23, 0)) {
         const auto& model = raw.imgdata.idata.model;
         error = "RAW unpack (" +
             std::string(std::begin(model), std::find(std::begin(model), std::end(model), '\0')) +
@@ -214,6 +219,11 @@ bool decode_raw_compatible(const std::filesystem::path& source,
 
 bool decode_raw_compatible(const std::filesystem::path& source, const std::array<float, 4>* user_mul,
                            DecodedRaw& out, std::string& error) {
+    return decode_raw_compatible(source, user_mul, 0, out, error);
+}
+
+bool decode_raw_compatible(const std::filesystem::path& source, const std::array<float, 4>* user_mul,
+                           std::uint32_t max_edge, DecodedRaw& out, std::string& error) {
     error.clear();
     const auto total_start = Clock::now();
     try {
@@ -304,16 +314,11 @@ bool decode_raw_compatible(const std::filesystem::path& source, const std::array
             error = "RAW output: inconsistent image byte count or unsupported dimensions";
             return false;
         }
-        decoded.width = image->width;
-        decoded.height = image->height;
-        decoded.rgb.resize(static_cast<std::size_t>(samples));
-        for (std::size_t i = 0; i < decoded.rgb.size(); ++i) {
-            std::uint16_t value;
-            // LibRaw returns native-endian 16-bit samples. memcpy avoids
-            // imposing alignment or aliasing assumptions on its byte array.
-            std::memcpy(&value, image->data + i * sizeof(value), sizeof(value));
-            decoded.rgb[i] = static_cast<float>(static_cast<double>(value) / 65535.0);
-        }
+        // dcraw_make_mem_image owns an independent oriented output. Release
+        // the sensor and demosaicing buffers before allocating float RGB.
+        raw.reset();
+        detail::raw_output_to_float(image->data, image->width, image->height, max_edge,
+                                    decoded.rgb, decoded.width, decoded.height);
         decoded.timings.convert_ms = elapsed_ms(start);
         decoded.timings.total_ms = elapsed_ms(total_start);
         out = std::move(decoded);

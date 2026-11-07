@@ -84,6 +84,12 @@ bool decode_raw_compatible(const std::filesystem::path& source,
 bool decode_raw_compatible(const std::filesystem::path& source, const std::array<float, 4>* user_mul,
                            DecodedRaw& out, std::string& error);
 
+// Same full-size demosaicing and 16-bit linear output, area-averaged to a
+// bounded long edge before float allocation. Zero keeps full dimensions.
+// Used by Android to avoid retaining several full-size RGB buffers at once.
+bool decode_raw_compatible(const std::filesystem::path& source, const std::array<float, 4>* user_mul,
+                           std::uint32_t max_edge, DecodedRaw& out, std::string& error);
+
 // Experimental expanded-output policy for conventional three-colour Bayer
 // RAW only. As-shot WB is normalised by its largest multiplier (highlight=1)
 // before uint16 AHD demosaicing. LibRaw's actual ProPhoto matrix is evaluated

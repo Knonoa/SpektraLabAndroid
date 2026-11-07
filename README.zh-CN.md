@@ -1,121 +1,101 @@
-# SpektraLab™
+# SpektraLab 安卓版
 
-[English](README.md) · **简体中文** · [spektralab.app](https://spektralab.app)
+**简体中文** · [English](README.md)
 
-macOS 上的胶片与放大相纸模拟器。打开一张 RAW，选好胶片和相纸，约一秒内得到一张按物理过程建模的照片——颗粒、光晕、成色剂耦合、放大机滤色，一样不少。
+基于 Andrea Volpato 的 [spektrafilm](https://github.com/andreavolpato/spektrafilm) 胶片过程模型，将 [SpektraLab](https://github.com/JamesQiu2005/SpektraLab) 移植到 Android 的非官方项目。导入照片或直接拍摄，选择胶片、相纸进行冲印模拟，再把结果保存到手机。图像在本机处理，无需账号或上传云端。目前应用界面以中文为主，项目文档提供中英文版本。
 
-![SpektraLab：曼哈顿下城，Kodak Portra 160 胶片，Kodak Vision 2383 放映拷贝片](screenshots/Screenshot_ZH_HANS.png)
+**[下载最新 APK](https://github.com/Knonoa/SpektraLabAndroid/releases/latest)** · [1.2 发布说明](SpektraDroid/docs/releases/1.2.md) · [RAW 实测记录](SpektraDroid/docs/RAW_VALIDATION.md)
 
-- **光谱计算，不是 LUT。** 光线以 81 个波长穿过胶片与相纸各自的染料层，和暗房里的过程一致。
-- **物理尺度。** 告诉它底片是 120 还是 135，颗粒、光晕和成色剂扩散就按画幅以微米为单位缩放。
-- **快。** C++ Metal 引擎直接编译进应用：4500 万像素在预览尺寸下重印约 0.01 秒，全分辨率渲染不到一秒。
-- **一条色彩管线。** 全程 ProPhoto RGB；每次导出只做一次色域映射，映射到你指定的色彩空间，写入前可先软打样。
-- **胶片本身。** “片边”把画面印在它自己的胶片上——片基、齿孔、各胶片自己的片边字与格号，均按真实胶片实测——支持 135、半格、XPan、645 至 6×9、6×12 与 6×17。“日期后背”把日期曝在底片上。
-- **半格拼接。** 两张照片同在一段胶片上，左右或上下排列，各自有独立的曝光、白平衡、印相与调色。
-- **可脚本化。** `spektralab` 命令行与 MCP 服务器驱动的是与窗口同一个会话。默认关闭，在设置中开启。
+## 功能
 
-| RAW 解码 ⟷ 胶片与相纸（⌥\\） | 1:1 颗粒 |
-|---|---|
-| ![前后对比](screenshots/natural_halation.png) | ![1:1 颗粒](screenshots/physically_accurate_grain.png) |
+- **胶片与相纸模拟**：25 款胶片、9 款相纸，曝光、放大机、颗粒、光晕、散射、显影成色剂和扫描锐化。Kotlin / Jetpack Compose 编辑器，C++20 本机处理引擎。
+- **胶片边框 Film Edge**：135、半格、XPan、120 等画幅，片门、齿孔、胶片型号、帧号、片边雾化和漏光。边框作为底片曝光的一部分参与显影。
+- **日期后背 Date Back**：液晶或点阵日期，以及 EXIF 中可用的快门、光圈、曝光补偿等拍摄数据。胶片型号印在片边。
+- **拍摄页面**：CameraX 取景、实时胶片预览、闪光灯和变焦；查看系统公开的逻辑/物理摄像头及其参数，并在设备允许时指定物理镜头。
+- **复用手机成像能力**：优先使用厂商公开的 CameraX 扩展；部分设备可走 Camera2 HAL HDR 场景模式。「系统相机」按钮调用手机自带相机，再导入回传照片。可用模式取决于设备及系统相机的回传能力。
+- **RAW 与 TIFF 导入**：DNG、索尼 ARW、尼康 NEF、佳能 CR2/CR3、经典 TIFF/TIF，以及普通图像。原生线性浮点图像送入胶片引擎，RAW 计算输入不经过 8 位显示位图。
+- **编辑与导出**：640/1600 像素渐进预览、缩放和分屏对比、设置自动保存、可取消的 JPEG 导出。保存到 `Pictures/SpektraLab`，可选输出尺寸，源图长边最高 4096 像素；加入片边后的最终画布可能更大。
 
 ## 安装
 
-从 [spektralab.app](https://spektralab.app) 或 [Releases](https://github.com/JamesQiu2005/SpektraLab/releases) 下载 DMG，打开后把 SpektraLab 拖进“应用程序”文件夹。应用已用 Developer ID 签名，并通过 Apple 公证，可以像其他应用一样直接打开。
+需要 **Android 8.0 / API 26 及以上**。通用 APK 包含 **arm64-v8a、armeabi-v7a、x86_64**。从 [Releases](https://github.com/Knonoa/SpektraLabAndroid/releases) 下载 APK，在系统提示时允许浏览器或文件管理器安装应用。
 
-需要 Apple 芯片、macOS 15 或更高版本。
+**从 1.1 升级**：旧公开版本使用调试证书，本工作区没有其私钥。1.2 改用独立发布密钥，安装前请备份需要保留的设置，再卸载 1.1；卸载会清除应用设置和缓存。后续发布必须沿用 1.2 密钥，才能覆盖升级。已有 `.dev` / `.usb` 开发版是独立应用。
 
-1.3.3 之前的版本为 ad-hoc 签名。使用这些版本时，首次运行前需解除隔离：
+1.2 正式包名为 `com.spektralab.android`，版本号 `1.2`、版本代码 `3`，启用代码压缩和资源精简。进入拍摄页时请求相机权限；Android 8–9 保存导出照片还需要存储权限。
 
-```bash
-xattr -d -r com.apple.quarantine /Applications/SpektraLab.app
-```
+## 使用
 
-## 多选与同步照片
+1. 选择照片，或从相册分享/打开到本应用。部分文件提供器把 RAW 归类为通用二进制文件，选择器也允许这种类型。
+2. 选择胶片、相纸，调整曝光、放大机和效果。长按查看原图，也可使用分屏对比。
+3. 在「片边」页开启胶片边框和日期打印。启用边框后，照片会居中裁成所选片门比例。
+4. 进入「拍摄」页拍照，可开启胶片预览；需要手机自带相机的模式时使用「系统相机」。拍摄完成后回到编辑器。
+5. 导出 JPEG 到系统相册。
 
-单击照片将其设为当前照片，再按住 Command 单击其他照片即可增选或取消选择，
-当前照片保持不变。Command+A（编辑 → 全选照片）选中图库中的全部照片，并保留
-当前照片作为同步源；刚打开文件夹时则打开第一张。在文字输入框中，Command+A
-仍然用于全选文字。
+## RAW 实测与限制
 
-在“设置剪贴板”中勾选需要传递的项目，再点击 **同步到 N 张**（或编辑 → 同步设置）。
-同步读取当前照片的最新编辑，不改变剪贴板和源照片，立即保存其他选中照片的设置，
-并在打开它们时重新显影。沿用现有剪贴板规则，裁剪、显影后调整、镜头校正、
-Film Edge 和 Date Back 不参与同步；拍摄时白平衡和场景放置拟合由目标照片自行解析。
-同步没有批量撤销，状态栏会报告写入和失败数量。批量导出期间禁止修改选择和同步。
+已从公开样片库下载真实 RAW，逐文件核对 SHA-256，在 **arm64 Android 15 / API 35 模拟器**中完成 **640 和 1024 像素两级解码、浮点胶片处理及 JPEG 输出**：
 
-## 片边、日期后背与半格拼接
+| 相机 | 实测样片模式 |
+|---|---|
+| 索尼 A7R V | 降尺寸无损压缩 RAW |
+| 索尼 A7R VI | APS-C HQ ARW6、全画幅无损 RAW |
+| 索尼 A1 | 全画幅压缩 RAW |
+| 索尼 A1 II | 全画幅无损 Small RAW |
+| 索尼 A7 V | APS-C HQ ARW6 |
+| 索尼 A7 IV | APS-C 未压缩 RAW |
+| 尼康 Z8 | HE 系列高质量压缩 |
+| 尼康 Z9 / Z6 III | HE 系列压缩 |
 
-**片边**（左栏）让画布变成胶片：选定画幅后，画面按片门裁切并显示在片条上，带有该胶片自己的片边字和可设定的格号；条扫的画面止于胶片边缘。裁剪成为片门内的取景，因此属于底片的一部分。**日期后背**把拍摄日期（或自行输入的日期）曝进画面，无需开启片边；开启片边后可同时把拍摄数据印在画面旁，120（645 至 6×9）的日期与数据则印在画面旁的片边上，一如中画幅后背。
+这 9 款相机的 10 份样片全部通过，另有 5 份 ARW/NEF/CR2/CR3/DNG 回归样片通过。调试版测试共 **10 项，零失败、零跳过**。模式、尺寸、耗时与校验值见 [RAW_VALIDATION.md](SpektraDroid/docs/RAW_VALIDATION.md) 和 [raw-fixtures.json](SpektraDroid/docs/raw-fixtures.json)；发布包验证见 [1.2 发布说明](SpektraDroid/docs/releases/1.2.md)。
 
-**半格拼接**是把两张照片放在一格 135 的胶片上。片边画幅选“半格”时，其下方出现 **进入半格拼接**（或选中两张照片后按 ⌘J）。画布显示两个片格，空格上有 **+**。点击片格即选中其中的照片：此时“输入 / 相机”、场景置位、放大机与显影后调整只作用于这一格，选“含片基”则连同周围的胶片一起变化。右键片格可替换、旋转或裁剪其中的照片。裁剪模式下，拖动移动画面，滚动或捏合以指针为中心缩放。一组拼接在胶片条中是一个项目，导出为一张图。
-
-在胶片条上拖动缩略图即可调整文件夹内的顺序，顺序按文件夹保存。从访达拖入的文件仍然直接打开并编辑。
+- 这些样片不代表所有 RAW 压缩、裁切、连拍和方向组合都已覆盖。尚未逐机验证原始全分辨率或 4096 像素 RAW 胶片导出，也不能将模拟器耗时当作手机性能。
+- 为支持新索尼格式和尼康 HE/HE*，固定使用 LibRaw 官方开发快照 `0.23.0-Snapshot202611`，并非 LibRaw 稳定发布版。
+- RAW 先用 LibRaw 输出 **16 位线性 compatible 图像**，之后缩图、颜色转换、胶片处理采用 float32；去马赛克仍有整数计算，该策略本身也有高光裁切。显示与 JPEG 导出为 8 位 sRGB，尚无 16 位 TIFF 导出。
+- 大 RAW 仍需较多内存。本轮 A7R VI 全画幅样片曾触发内存不足，已通过提早释放解码缓冲、再生成所需尺寸浮点图修复；低内存设备仍需单独验证。
+- 摄像头和拍摄模式取决于厂商向第三方开放的能力。厂商扩展会话中胶片预览不可用，HAL HDR 路径仍可使用；HDR、夜景及预览与实拍一致性因手机而异。应用没有嵌入谷歌相机，也没有手动多图 HDR 合成功能。
+- 半格双联、交互裁切尚未实现。安卓端使用原生 CPU 引擎，不能套用桌面 GPU 的性能数据。
 
 ## 构建
 
-Xcode 26.6。
+在 Android Studio 中打开 **`SpektraDroid/`**，或使用 Gradle wrapper。依赖：JDK 17、Android SDK 35、Build Tools 34.0.0、NDK `27.2.12479018`、CMake `3.22.1`、Git。工程固定 Gradle 8.7 和 AGP 8.5.2。设置 `ANDROID_HOME`，或在本地 `local.properties` 写入 `sdk.dir=…`。
 
 ```bash
-engine/build.sh bundle                 # 引擎、着色器、预烘焙资源
-cd modern_UI/Spektrafilm
-xcodebuild -project Spektrafilm.xcodeproj -scheme Spektrafilm \
-           -derivedDataPath build/DerivedData build
+git clone https://github.com/Knonoa/SpektraLabAndroid.git
+cd SpektraLabAndroid/SpektraDroid
+bash tools/setup_libraw.sh
+./gradlew assembleDebug
 ```
 
-`engine/resources/` 有改动时请重新运行 `engine/build.sh bundle`。若 Xcode 突然找不到 `metal`，清理构建文件夹（⇧⌘K）即可：Metal 工具链的挂载路径变了，而旧构建缓存了原路径。
+依赖脚本获取并校验 LibRaw 固定提交 `0b87f5c907d7ee0e7641dd1b6a6c9140b9451922`。也可以用 `SPEKTRALAB_LIBRAW_SOURCE` 指向同一干净提交。引擎数据和字体已随源码提供，普通编译及手机运行均不需要 Python。
 
-## 测试
+调试 APK 位于 `app/build/outputs/apk/debug/app-debug.apk`，包名 `com.spektralab.android.dev`。macOS 可运行 `tools/build_install_mac.command` 编译并通过 adb 安装。正式签名配置见 [RELEASING.md](SpektraDroid/docs/RELEASING.md)。
 
 ```bash
-xcodebuild -project Spektrafilm.xcodeproj -scheme SpektrafilmTests \
-           -derivedDataPath build/DerivedData test       # 约 550 个用例，约 6 分钟
+./gradlew connectedDebugAndroidTest
 ```
 
-相机测试样片来自上游 `spektrafilm` 仓库，通过 `tests` 软链接接入（`ln -s ../spektrafilm/tests tests`）。缺少样片时有 25 个用例会被跳过，运行结果依然显示 0 失败，只需约 20 秒——请以耗时判断，而非失败数。
+仓库包含合成 TIFF/DNG 测试。没有外部真实 RAW 时，相机样片测试会跳过；要强制验证样片数量，请按[验证指南](SpektraDroid/docs/RAW_VALIDATION.md)传入 `rawFixtureDir` 和 `rawFixtureCount`，不能把跳过结果当作相机兼容性验证。
 
 ## 目录
 
-| | |
+| 路径 | 内容 |
 |---|---|
-| `modern_UI/Spektrafilm/` | 应用本体：SwiftUI、AppKit、Metal |
-| `engine/` | C++20 渲染引擎、MSL 着色器与 C ABI |
-| `engine/resources/` | 预烘焙常量、28 款胶片与相纸配置、放大 LUT |
-| `ARCHITECTURE.md` | 整体结构——从这里开始读 |
-| `AGENTS.md` | 约定，以及真正耗过时间的坑 |
+| `SpektraDroid/app/src/main/java/` | 安卓编辑器、相机、状态、图像导入导出 |
+| `SpektraDroid/app/src/main/cpp/` | 安卓引擎、JNI、片边及线性图像适配 |
+| `SpektraDroid/app/src/main/assets/` | 引擎数据、字体和许可文本 |
+| `SpektraDroid/app/src/androidTest/` | JNI、精度、RAW/TIFF、相机枚举测试 |
+| `SpektraDroid/tools/` | 依赖准备、数据生成、参考对比工具 |
+| `engine/` | 上游共享引擎资源与原生 RAW/TIFF 读取器 |
+| `modern_UI/`、`windows_UI/`、`desktop/` | 保留的上游平台代码，不是安卓应用入口 |
 
-## Windows 开发版
+本仓库安卓开发使用 `main` 分支。贡献请拆成便于审查的提交，保留署名和许可证，并写明实际运行的检查。片边生成方式见 [HANDOFF.md](SpektraDroid/docs/HANDOFF.md)：修改拼装源文件，再生成 `overscan.cpp`。
 
-本分支增加了 C++/Vulkan 后端、原生 LibRaw 解码、RGB16 TIFF 导出和 Windows 桌面界面。
-构建方法见 [Windows 说明](engine/WINDOWS.md)，已验证功能及限制见 [功能覆盖表](engine/WINDOWS_FEATURE_COVERAGE.md)。
-[Qt Quick 前端](windows_UI/README.md) 已开始复刻胶片与相纸编辑布局，同时保留[最小 Win32 窗口](engine/WINDOWS_DESKTOP.md)。
-上文介绍的 macOS 产品还包含尚未完成 Windows 迁移的界面与显示功能。
+## 致谢、许可与名称
 
-## 参与贡献
+- [spektrafilm](https://github.com/andreavolpato/spektrafilm)，Andrea Volpato：胶片过程模型、实测彩色胶片数据和参考实现；新增黑白胶片数据：Hanze Qiu。
+- [SpektraLab](https://github.com/JamesQiu2005/SpektraLab)：原生参考引擎、Film Edge 与 Date Back；[Knonoa/SpektraLabAndroid](https://github.com/Knonoa/SpektraLabAndroid)：安卓移植。
+- 应用与引擎：**GPL-3.0-or-later**，见 [LICENSE.txt](LICENSE.txt)；胶片、相纸和派生 LUT 数据：**CC BY-SA 4.0**，另见[上游数据声明](license/SPEKTRAFILM_LICENSE.txt)。
+- [LibRaw](https://github.com/LibRaw/LibRaw)：LGPL-2.1 或 CDDL，本发行选择 LGPL-2.1；TeX Gyre Heros：GUST Font License；DejaVu：附带字体许可；stb：公有领域 / MIT；AndroidX：Apache-2.0。相关声明和许可文本保存在 APK assets 与源码中。
 
-欢迎提交 Pull Request，请遵守以下三条规则：
-
-- **Windows 与 Linux 相关的工作只提交到 `Windows_Linux` 分支，不要提交到 `main`。**
-  `main` 是 macOS 产品；针对它的 Windows 或 Linux 相关 PR 会被关闭，并请你改投目标分支。
-- **把工作拆成可审阅的多个提交。** 每个提交只做一件事，提交信息写清做了什么、为什么。
-  把整个功能、重命名和格式调整塞进一个大提交的 PR 无法审阅，不会被合并。
-- **尊重开源社区。** 保留许可与致谢（见下文），注明你所依赖的他人工作，在 issue 与评审中保持礼貌。
-
-## 致谢与许可
-
-胶片过程模型、28 款实测配置与放大 LUT 来自 Andrea Volpato 的 [spektrafilm](https://github.com/andreavolpato/spektrafilm)；4 款黑白胶片配置来自开发者本人 Hanze Qiu; SpektraLab 是该引擎的原生 C++/Metal 移植，以及围绕它构建的应用。
-
-| | |
-|---|---|
-| 应用与引擎 | GPL-3.0-or-later |
-| 胶片与相纸配置、放大 LUT | CC BY-SA 4.0 |
-| metal-cpp | Apache-2.0 |
-
-全部许可文本随应用附带，见 **SpektraLab → 关于 SpektraLab**。
-
-## 商标
-
-SpektraLab™ 名称及其图标由广州松子智能科技服务有限公司管理，相关商标注册申请正在办理中。
-
-欢迎 Fork。你可以依照开源许可研究、修改、移植和再分发代码；这些许可涵盖代码与数据，但不包括名称与图标。在个人 fork 中保留它们没有问题。如果要向他人发布构建版本，即使是免费的，也请换用自己的名称和图标。欢迎说明项目基于 SpektraLab，但请清楚标明它并非官方版本。
-
-对于冒充官方版本或暗示获得我们认可的行为，我们保留依法采取措施的权利。
+本项目为**非官方安卓移植**，不代表上游作者背书。SpektraLab 名称与图标另受上游商标条款约束，源码和数据许可不授予商标权；再次发行衍生应用前，请查阅[上游商标说明](https://github.com/JamesQiu2005/SpektraLab#trademark)。

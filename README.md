@@ -1,176 +1,101 @@
-# SpektraLab™
+# SpektraLab for Android
 
-**English** · [简体中文](README.zh-CN.md) · [spektralab.app](https://spektralab.app)
+[简体中文](README.zh-CN.md) · **English**
 
-A film and print simulator for macOS. Open a RAW, pick a film and a paper,
-and get a physically modelled print — grain, halation, couplers, the enlarger's
-filter pack — in about a second.
+An unofficial Android port of [SpektraLab](https://github.com/JamesQiu2005/SpektraLab), built on Andrea Volpato’s [spektrafilm](https://github.com/andreavolpato/spektrafilm) film-process model. Import a photograph or take one, develop it with film and paper profiles, and save the result locally. Processing runs on the device; no account or cloud upload is required. The current app interface is primarily Chinese; this documentation is bilingual.
 
-![SpektraLab: Lower Manhattan on Kodak Portra 160, printed on Kodak Vision 2383](screenshots/Screenshot_English.png)
+**[Download the latest APK](https://github.com/Knonoa/SpektraLabAndroid/releases/latest)** · [1.2 release notes](SpektraDroid/docs/releases/1.2.md) · [RAW validation](SpektraDroid/docs/RAW_VALIDATION.md)
 
-- **Spectral, not a LUT.** Light is traced through 81 wavelengths, the film's
-  dye layers and the paper's, the way a darkroom does it.
-- **Physical units.** Tell it the negative is 120 or 35 mm and the grain,
-  halation and coupler diffusion scale with the frame in micrometres.
-- **Fast.** A C++ Metal engine compiled into the app: a 45 MP reprint in
-  ~0.01 s at preview size, a full-resolution render in under a second.
-- **One colour pipeline.** ProPhoto RGB throughout; each export is gamut-mapped
-  once into the space you ask for, and proofed before it is written.
-- **The film itself.** Film Edge prints the frame on its own strip — rebate,
-  perforations, each stock's edge print and frame numbers, measured on real
-  strips — in 135, half frame, XPan, 645 to 6×9, 6×12 and 6×17. Date Back
-  exposes a date onto the negative.
-- **Half-frame pairs.** Two frames on one piece of film, side by side or one
-  above the other, each with its own exposure, white balance, print and grade.
-- **Scriptable.** `spektralab` (CLI) and an MCP server drive the same session
-  the window does. Off until enabled in Settings.
+## What it does
 
-| RAW decode ⟷ film and paper (⌥\\) | grain at 1:1 |
-|---|---|
-| ![Before and after](screenshots/natural_halation.png) | ![Grain at 1:1](screenshots/physically_accurate_grain.png) |
+- **Film and paper simulation:** 25 film stocks and 9 papers, exposure and enlarger controls, grain, halation, scattering, development couplers and scan sharpening. Native C++20 processing with a Kotlin / Jetpack Compose editor.
+- **Film Edge:** 135, half-frame, XPan and 120 formats; gates, perforations, stock markings, frame numbers, fog and light leaks. Borders enter the negative’s exposure and development pipeline.
+- **Date Back:** LCD-style or dot-matrix dates, plus available EXIF shooting data such as shutter speed, aperture and exposure compensation. The stock name appears on the film edge.
+- **Capture page:** CameraX viewfinder, live film preview, flash and zoom; camera inventory shows public logical/physical cameras and their reported capabilities. Supported physical lenses can be requested explicitly.
+- **Phone camera processing:** offers manufacturer CameraX extensions where exposed, with a Camera2 HDR scene-mode path on compatible devices. The system-camera button opens the phone’s camera and imports its returned image. Available modes depend on the device and what its camera app returns.
+- **RAW and TIFF import:** DNG, Sony ARW, Nikon NEF, Canon CR2/CR3 and classic TIFF/TIF, alongside ordinary image imports. Native linear float images feed the film engine; an 8-bit display bitmap is not the RAW processing source.
+- **Editing and output:** progressive 640/1600 px editor previews, zoom and split comparison, saved adjustment settings, cancellable JPEG export to `Pictures/SpektraLab`, with selectable output sizes up to a 4096 px source long edge. Film borders can enlarge the final canvas.
 
 ## Install
 
-Download the DMG from [spektralab.app](https://spektralab.app) or
-[Releases](https://github.com/JamesQiu2005/SpektraLab/releases), open it and
-drag SpektraLab to Applications. It is signed with a Developer ID and
-notarised by Apple, so it opens like any other app.
+Android **8.0 / API 26 or later**. The universal APK contains **arm64-v8a, armeabi-v7a and x86_64**. Download the APK from [Releases](https://github.com/Knonoa/SpektraLabAndroid/releases), then allow installation from your browser or file manager when Android asks.
 
-Apple silicon, macOS 15 or later.
+**Upgrading from 1.1:** the old public build used a debug certificate whose private key is unavailable in this workspace. Version 1.2 uses a dedicated release signing key. Back up any settings you need and uninstall 1.1 before installing 1.2; uninstalling removes app settings/cache. Future releases must retain the 1.2 signing key to support in-place updates. Existing `.dev` / `.usb` developer builds are separate applications.
 
-Releases before 1.3.3 are ad-hoc signed. For one of those, clear the
-quarantine once:
+Version 1.2 uses application ID `com.spektralab.android`, version code `3`, with code shrinking and resource shrinking enabled. Camera permission is requested when opening capture; Android 8–9 also require storage permission to save exports.
 
-```bash
-xattr -d -r com.apple.quarantine /Applications/SpektraLab.app
-```
+## Use
 
-## Select and sync photos
+1. Open a photo with the document picker, or share/open it from a gallery. RAW providers sometimes classify files as generic binary data; the picker accepts that type too.
+2. Choose a film and paper; adjust exposure, enlarger settings and effects. Long-press to see the original, or use split comparison.
+3. Open the **片边** tab for Film Edge and Date Back. Borders crop the image centrally to the selected gate.
+4. Open **拍摄** to take a photo, optionally with live film preview. Use **系统相机** for modes available in the phone’s own camera application. The finished capture returns to the editor.
+5. Export a JPEG to the system gallery.
 
-Click a photo to make it the current photo, then Command-click other photos to
-add or remove them without moving the current photo. Command+A (Edit → Select
-All Photos) selects the library and keeps the current photo as the sync source.
-In a newly opened folder it opens the first photo. Command+A inside a text field
-still selects text.
+## Verified RAW support and limits
 
-Under Settings Clipboard, tick the groups to transfer and choose **Sync to N**
-(or Edit → Sync Settings). This reads the current photo's latest edits, preserves
-the clipboard and source photo, and saves the other selected photos immediately.
-They develop with those settings when opened. Crop, Post-Dev adjustments, lens
-correction, Film Edge and Date Back stay with each photo, following the existing
-clipboard rules. As Shot white balance and fitted Scene Placement are resolved
-for each target. Sync has no batch undo; the status reports writes and failures.
-Selection and sync are disabled during batch export.
+Real public RAW samples were downloaded, SHA-256 checked against their source indexes, decoded at **640 and 1024 px**, processed through the float film engine and written as JPEG on an **arm64 Android 15 / API 35 emulator**:
 
-## Film Edge, Date Back and half-frame pairs
+| Camera | Tested sample mode |
+|---|---|
+| Sony A7R V | Reduced-size lossless-compressed RAW |
+| Sony A7R VI | APS-C HQ ARW6 and full-frame lossless RAW |
+| Sony A1 | Full-frame compressed RAW |
+| Sony A1 II | Full-frame lossless Small RAW |
+| Sony A7 V | APS-C HQ ARW6 |
+| Sony A7 IV | APS-C uncompressed RAW |
+| Nikon Z8 | HE-family high-quality compression |
+| Nikon Z9 / Z6 III | HE-family compression |
 
-**Film Edge** (left rail) turns the canvas into the film: pick a format and the
-frame is cut to its gate and shown on the strip, with the stock's own edge
-print and a frame number you can set; a strip scan ends at the film's edges.
-The crop becomes the framing in the gate, so it is part of the
-negative. **Date Back** exposes the shooting date (or a date you type) into the
-frame; it needs no film edge. With one, it can print the shooting data beside
-the frame at the same time, and on 120 (645 to 6×9) the date and the data go
-in the film margin, where a medium-format back printed them.
+All 10 samples from these 9 cameras passed, as did 5 additional ARW/NEF/CR2/CR3/DNG regression samples. The debug test suite passed **10 tests, zero failures and zero skips**. Full results, modes, timings and checksums are in [RAW_VALIDATION.md](SpektraDroid/docs/RAW_VALIDATION.md) and [raw-fixtures.json](SpektraDroid/docs/raw-fixtures.json). Release-package validation is recorded in [the 1.2 notes](SpektraDroid/docs/releases/1.2.md).
 
-**A half-frame pair** is two frames on one frame's worth of 135. With Film Edge
-on *Half*, **Enter Half-Frame Pair** appears under the format (or pick two
-photos and press ⌘J). The canvas shows two holes; an empty one has a **+**.
-Click a hole to pick its frame: Input / Camera, Scene Placement, the Enlarger
-and Post-Dev then act on that frame alone, and *+ Film* moves the film around
-it too. Right-click a hole to replace, turn or crop its frame. In the crop
-mode, drag moves the picture under its hole and scroll or pinch scales it about
-the pointer. A pair is one item in the filmstrip and exports as one picture.
-
-Drag a thumbnail along the filmstrip to reorder a folder; the order is kept for
-that folder. A file dropped from Finder still opens and edits.
+- Tested modes do not establish support for every RAW compression, crop, burst or orientation combination. Full-resolution / 4096 px RAW film export and device-specific performance have not been validated across these cameras.
+- LibRaw `0.23.0-Snapshot202611` is pinned to an immutable official development snapshot for new Sony formats and Nikon HE/HE*. It is not a stable LibRaw release.
+- RAW conversion uses LibRaw’s **16-bit linear compatible output**, then float32 resizing, colour conversion and film processing. Integer demosaicing and that policy’s highlight clipping still apply. Display and JPEG output are 8-bit sRGB; 16-bit TIFF export is not implemented.
+- Large RAW files still require substantial memory. A full-frame A7R VI sample exposed an out-of-memory problem; releasing decoder buffers before bounded float allocation fixed the tested import path. Low-memory devices remain a separate validation target.
+- Android exposes only the cameras and modes the phone manufacturer permits. Live film preview is unavailable in manufacturer extension sessions; HAL HDR can still support it. HDR/night behaviour and preview-to-capture agreement vary by phone. The app does not embed Google Camera or implement a manual multi-photo HDR merger.
+- Half-frame pairs and an interactive crop tool are not implemented. This Android port uses a native CPU engine, so desktop GPU performance does not apply.
 
 ## Build
 
-Xcode 26.6.
+Open **`SpektraDroid/`** in Android Studio, or use the Gradle wrapper. Requirements: JDK 17, Android SDK 35, Build Tools 34.0.0, NDK `27.2.12479018`, CMake `3.22.1`, and Git. Gradle 8.7 and AGP 8.5.2 are specified in the project. Set `ANDROID_HOME` or create a local `local.properties` with `sdk.dir=…`.
 
 ```bash
-engine/build.sh bundle                 # engine, kernels, baked resources
-cd modern_UI/Spektrafilm
-xcodebuild -project Spektrafilm.xcodeproj -scheme Spektrafilm \
-           -derivedDataPath build/DerivedData build
+git clone https://github.com/Knonoa/SpektraLabAndroid.git
+cd SpektraLabAndroid/SpektraDroid
+bash tools/setup_libraw.sh
+./gradlew assembleDebug
 ```
 
-Re-run `engine/build.sh bundle` whenever `engine/resources/` changes. If Xcode
-suddenly cannot find `metal`, clean the build folder (⇧⌘K): the Metal
-toolchain's mount path changed under a cached build.
+`setup_libraw.sh` fetches and verifies LibRaw commit `0b87f5c907d7ee0e7641dd1b6a6c9140b9451922`. Override its location with `SPEKTRALAB_LIBRAW_SOURCE` only when pointing at the same clean commit. Engine tables and fonts are included; Python is unnecessary for ordinary builds or on the phone.
 
-## Test
+Debug output: `app/build/outputs/apk/debug/app-debug.apk`, package `com.spektralab.android.dev`. On macOS, `tools/build_install_mac.command` also builds and installs through adb. Signed release builds require private signing configuration; follow [RELEASING.md](SpektraDroid/docs/RELEASING.md).
 
 ```bash
-xcodebuild -project Spektrafilm.xcodeproj -scheme SpektrafilmTests \
-           -derivedDataPath build/DerivedData test       # ~550 tests, ~6 min
+./gradlew connectedDebugAndroidTest
 ```
 
-Camera fixtures come from the upstream `spektrafilm` repository through a
-`tests` symlink (`ln -s ../spektrafilm/tests tests`). Without it 25 cases skip
-and the run still reports 0 failures in ~20 s — trust the duration.
+Synthetic TIFF/DNG fixtures are included. External real-camera tests skip without developer-provided RAW samples; use `rawFixtureDir` and `rawFixtureCount` as described in the [validation guide](SpektraDroid/docs/RAW_VALIDATION.md) to require an exact sample count. Do not interpret a skipped fixture test as camera compatibility.
 
-## Layout
+## Repository
 
-| | |
+| Path | Purpose |
 |---|---|
-| `modern_UI/Spektrafilm/` | the app: SwiftUI, AppKit, Metal |
-| `engine/` | the C++20 render engine, its MSL kernels and C ABI |
-| `engine/resources/` | baked constants, 28 film and paper profiles, print LUTs |
-| `ARCHITECTURE.md` | how it fits together — start here |
-| `AGENTS.md` | conventions and the traps that cost real time |
+| `SpektraDroid/app/src/main/java/` | Android editor, camera, state and image import/export |
+| `SpektraDroid/app/src/main/cpp/` | Android engine, JNI, film edges and linear-image adapter |
+| `SpektraDroid/app/src/main/assets/` | Baked engine data, fonts and licence texts |
+| `SpektraDroid/app/src/androidTest/` | JNI, precision, RAW/TIFF and camera-inventory tests |
+| `SpektraDroid/tools/` | Dependency setup, asset generation and parity tools |
+| `engine/` | Shared upstream engine resources and native RAW/TIFF readers |
+| `modern_UI/`, `windows_UI/`, `desktop/` | Retained upstream platform code; not the Android application |
 
-## Windows development
+Android development is on this repository’s `main` branch. Contributions should use focused commits, keep attribution/licences intact and state the checks actually run. Native border generation is documented in [HANDOFF.md](SpektraDroid/docs/HANDOFF.md); change its assembly sources rather than editing generated `overscan.cpp` directly.
 
-This branch also contains a C++/Vulkan backend, native LibRaw decoding,
-RGB16 TIFF export and Windows desktop viewers.
-See the [Windows build guide](engine/WINDOWS.md) and
-[feature coverage](engine/WINDOWS_FEATURE_COVERAGE.md) for the tested scope.
-The [Qt Quick frontend](windows_UI/README.md) brings the film/print editor layout
-to Windows; the [minimal Win32 viewer](engine/WINDOWS_DESKTOP.md) is also retained.
-The macOS product described above has additional interface and display features.
+## Credits, licences and name
 
-## Contributing
+- [spektrafilm](https://github.com/andreavolpato/spektrafilm), Andrea Volpato: film-process model, measured colour profiles and reference implementation. Additional black-and-white profiles: Hanze Qiu.
+- [SpektraLab](https://github.com/JamesQiu2005/SpektraLab): native reference engine, Film Edge and Date Back. [Knonoa/SpektraLabAndroid](https://github.com/Knonoa/SpektraLabAndroid): Android port.
+- Application and engine: **GPL-3.0-or-later**, see [LICENSE.txt](LICENSE.txt). Film/paper profiles and derived LUT data: **CC BY-SA 4.0**, with [upstream data terms](license/SPEKTRAFILM_LICENSE.txt).
+- [LibRaw](https://github.com/LibRaw/LibRaw): LGPL-2.1 or CDDL; this distribution uses LGPL-2.1. TeX Gyre Heros: GUST Font License; DejaVu: its included font licence. stb: public-domain / MIT terms. AndroidX: Apache-2.0. Notices and texts are included in the APK assets and source tree.
 
-Pull requests are welcome. Three rules:
-
-- **Windows and Linux work goes to the `Windows_Linux` branch, never to `main`.**
-  `main` is the macOS product; a Windows- or Linux-related pull request against
-  it will be closed and asked to retarget.
-- **Split your work into reviewable commits.** One commit per change, each with
-  a message that says what it does and why. A single commit that dumps a whole
-  feature, a rename and a reformat together cannot be reviewed and will not be
-  merged.
-- **Respect the open-source community.** Keep the licences and credits intact
-  (see below), credit the work you build on, and be civil in issues and reviews.
-
-## Credits and licence
-
-The film process model, its 28 measured color profiles and the print LUTs are
-[spektrafilm](https://github.com/andreavolpato/spektrafilm) by Andrea Volpato;
-4 new measured B&W profiles are by Hanze Qiu;
-SpektraLab is a native C++/Metal port of that engine and the application built
-around it.
-
-| | |
-|---|---|
-| app and engine | GPL-3.0-or-later |
-| film and paper profiles, print LUTs | CC BY-SA 4.0 |
-| metal-cpp | Apache-2.0 |
-
-All texts ship inside the app, under **SpektraLab → About SpektraLab**.
-
-## Trademark
-
-SpektraLab™ and the SpektraLab icon are managed by Guangzhou Songzi Intelligent
-Technology Services Co., Ltd.; trademark registration is in progress.
-
-Forks are welcome. You can study, modify, port and redistribute the code under
-its licences, which cover the code and data but not the name or the icon. Keeping
-both in a personal fork is fine. If you publish a build for other people, even a
-free one, please give it its own name and icon. You are welcome to say it is
-based on SpektraLab, as long as it is clear that your project is unofficial.
-
-We reserve the right to act against builds that pass themselves off as official
-or imply our endorsement.
+This is an **unofficial Android fork**, with no claim of endorsement by the upstream authors. SpektraLab’s name and icon have separate upstream trademark terms; the source/data licences do not grant trademark rights. See the [upstream project](https://github.com/JamesQiu2005/SpektraLab#trademark) before redistributing a renamed or branded derivative.

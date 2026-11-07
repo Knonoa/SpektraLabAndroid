@@ -1,0 +1,183 @@
+{
+  "sources": [
+    "https://raw.pixls.us/json/getrepository.php?set=all",
+    "https://rawdb.dnglab.org/api/sets/Sony/ILCE-7RM6"
+  ],
+  "fixtures": [
+    {
+      "filename": "canon-7d.CR2",
+      "make": "Canon",
+      "model": "EOS 7D",
+      "mode": "RAW (3:2)",
+      "notes": "",
+      "url": "https://raw.pixls.us/getfile.php/131/nice/Canon - EOS 7D - RAW (3:2).CR2",
+      "license": "CC0-1.0",
+      "bytes": 25155690,
+      "sha256": "b5e47c5fcf7332ac03e0134926f17a338a42e68c1fd7f83e16f45f4b767544e8"
+    },
+    {
+      "filename": "canon-r6.CR3",
+      "make": "Canon",
+      "model": "EOS R6",
+      "mode": "3:2",
+      "notes": "CRAW 1.6x crop",
+      "url": "https://raw.pixls.us/getfile.php/4659/nice/Canon - EOS R6 - 3:2.CR3",
+      "license": "CC0-1.0",
+      "bytes": 5273174,
+      "sha256": "74abb0a113d075ad9887a058082f40dd2a938c4813a08474d82356f11a027778"
+    },
+    {
+      "filename": "new-nikon-z6iii.NEF",
+      "make": "Nikon",
+      "model": "Z6_3",
+      "mode": "8bit compressed (3:2)",
+      "notes": "Local import",
+      "url": "https://raw.pixls.us/getfile.php/7810/nice/Nikon - Z6_3 - 8bit compressed (3:2).NEF",
+      "license": "CC0-1.0",
+      "bytes": 6520320,
+      "sha256": "a8fa2cacadcf9dc85475ebcf37fcc32614072bc155e39d01491cb9e293c1343d"
+    },
+    {
+      "filename": "new-nikon-z8.NEF",
+      "make": "Nikon",
+      "model": "Z 8",
+      "mode": "8bit 8bit compressed (3:2)",
+      "notes": "high efficiency hight",
+      "url": "https://raw.pixls.us/getfile.php/6618/nice/Nikon - Z 8 - 8bit 8bit compressed (3:2).NEF",
+      "license": "CC0-1.0",
+      "bytes": 35744768,
+      "sha256": "ea8b093cd11c946c5eeb501b775859e8e617ce1d79577abc41b233c339e4004c"
+    },
+    {
+      "filename": "new-nikon-z9.NEF",
+      "make": "Nikon",
+      "model": "Z 9",
+      "mode": "8bit 8bit compressed (3:2)",
+      "notes": "",
+      "url": "https://raw.pixls.us/getfile.php/5148/nice/Nikon - Z 9 - 8bit 8bit compressed (3:2).NEF",
+      "license": "CC0-1.0",
+      "bytes": 24839168,
+      "sha256": "be91bac25573adf7ec6320a542105d87b4fb9c956d7b620ec90d57ac2ae6c3f0"
+    },
+    {
+      "filename": "new-sony-a1.ARW",
+      "make": "Sony",
+      "model": "ILCE-1",
+      "mode": "14bit 14bit compressed (3:2)",
+      "notes": "AF-S mode, Aperture priority at f/8. Compressed raw full frame. In camera +1 exposure.",
+      "url": "https://raw.pixls.us/getfile.php/4465/nice/Sony - ILCE-1 - 14bit 14bit compressed (3:2).ARW",
+      "license": "CC0-1.0",
+      "bytes": 63216896,
+      "sha256": "ddb72880da333b46a4c13286f78473dacc11377ea874bc3656e64e30a8122a88"
+    },
+    {
+      "filename": "new-sony-a1m2.ARW",
+      "make": "Sony",
+      "model": "ILCE-1M2",
+      "mode": "lossless (3:2)",
+      "notes": "Lossless compressed Small-Size full-frame Sony Alpha1 II",
+      "url": "https://raw.pixls.us/getfile.php/7830/nice/Sony - ILCE-1M2 - lossless (3:2).ARW",
+      "license": "CC0-1.0",
+      "bytes": 26099712,
+      "sha256": "84a94ab4198077d19f697585c4425868fc05f00ff7ae3d661f25d0f94a0aea7c"
+    },
+    {
+      "filename": "new-sony-a7m4.ARW",
+      "make": "Sony",
+      "model": "ILCE-7M4",
+      "mode": "14bit 14bit uncompressed (3:2)",
+      "notes": "APS-C raw uncompressed",
+      "url": "https://raw.pixls.us/getfile.php/6933/nice/Sony - ILCE-7M4 - 14bit 14bit uncompressed (3:2).ARW",
+      "license": "CC0-1.0",
+      "bytes": 34177024,
+      "sha256": "bc0089c821a3711ebbeec3844cde5e5c247ac7cf9ca8ad9ae03a977b232216b2"
+    },
+    {
+      "filename": "new-sony-a7m5.ARW",
+      "make": "Sony",
+      "model": "ILCE-7M5",
+      "mode": "14bit (3:2)",
+      "notes": "aps-c compressed hq",
+      "url": "https://raw.pixls.us/getfile.php/8849/nice/Sony - ILCE-7M5 - 14bit (3:2).ARW",
+      "license": "CC0-1.0",
+      "bytes": 11481088,
+      "sha256": "c16cae99d26a2f8ad183d31a23823310a994aa058d55cfe56e4f82ba56865f57"
+    },
+    {
+      "filename": "new-sony-a7r5.ARW",
+      "make": "Sony",
+      "model": "ILCE-7RM5",
+      "mode": "4:3",
+      "notes": "taken in daylight",
+      "url": "https://raw.pixls.us/getfile.php/6234/nice/Sony - ILCE-7RM5 - 4:3.ARW",
+      "license": "CC0-1.0",
+      "bytes": 42364928,
+      "sha256": "036eb3875b4ab8823c22e0d01c3a2b13224584e98690f771a7f8001c16b6dff4"
+    },
+    {
+      "filename": "new-sony-a7r6-apsc-hq.ARW",
+      "make": "Sony",
+      "model": "ILCE-7RM6",
+      "mode": [
+        "14bits",
+        "3x2",
+        "landscape",
+        "lossy"
+      ],
+      "notes": "Combinations:\n* FF and APS-C\n* RAW Lossless, RAW Lossy, RAW Lossy HD\n* Portrait and Landscape (the former is important for lossy variants, I have a prototype decoder)",
+      "url": "https://rawdb.dnglab.org/api/download/Sony/ILCE-7RM6/arw6/ILCE-7RM6_APSC_land_RAW-C-HD.ARW",
+      "license": "CC0-1.0",
+      "bytes": 29720576,
+      "sha256": "b60a7e752d2a8102ccbe6eebcfdbf533c6b0f2545739090873e9e8eb32cc0637"
+    },
+    {
+      "filename": "new-sony-a7r6-ff-lossless.ARW",
+      "make": "Sony",
+      "model": "ILCE-7RM6",
+      "mode": [
+        "14bits",
+        "3x2",
+        "landscape",
+        "lossless"
+      ],
+      "notes": "Combinations:\n* FF and APS-C\n* RAW Lossless, RAW Lossy, RAW Lossy HD\n* Portrait and Landscape (the former is important for lossy variants, I have a prototype decoder)",
+      "url": "https://rawdb.dnglab.org/api/download/Sony/ILCE-7RM6/raw_modes/ILCE-7RM6_FF_land_RAW.ARW",
+      "license": "CC0-1.0",
+      "bytes": 100851712,
+      "sha256": "5cb3c870bc961cf6b079d56c860d0cdf11acd1afd04e5fb8dbe041bcfd2d6201"
+    },
+    {
+      "filename": "nikon-d1.NEF",
+      "make": "Nikon",
+      "model": "D1",
+      "mode": "12bit 12bit uncompressed (3:2)",
+      "notes": "Import from rawsamples.ch",
+      "url": "https://raw.pixls.us/getfile.php/201/nice/Nikon - D1 - 12bit 12bit uncompressed (3:2).NEF",
+      "license": "CC0-1.0",
+      "bytes": 4055474,
+      "sha256": "7886d8b0e1257897faa7404b98fe1086ee2d95606531b6285aed83a0939b768f"
+    },
+    {
+      "filename": "sony-a300.ARW",
+      "make": "Sony",
+      "model": "DSLR-A300",
+      "mode": "12bit 12bit compressed (3:2)",
+      "notes": "Import from rawsamples.ch",
+      "url": "https://raw.pixls.us/getfile.php/339/nice/Sony - DSLR-A300 - 12bit 12bit compressed (3:2).ARW",
+      "license": "CC0-1.0",
+      "bytes": 10519152,
+      "sha256": "daaa25127006b1178c298bce14de41c80ef0fd95101f0b3513e5126dfb8cced2"
+    },
+    {
+      "filename": "test-small.DNG",
+      "make": "Canon",
+      "model": "PowerShot SD450",
+      "mode": "CHDK",
+      "notes": "Import from rawsamples.ch",
+      "url": "https://raw.pixls.us/getfile.php/661/nice/Canon - PowerShot SD450 - CHDK.DNG",
+      "license": "CC0-1.0",
+      "bytes": 6611520,
+      "sha256": "32357c5a870bcd26f6e975bd32905397f47121d0e39fc53d719b26e7adee8a22"
+    }
+  ]
+}

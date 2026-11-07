@@ -1,0 +1,96 @@
+11-07 11:03:26.176 13311 13325 I TestRunner: run started: 10 tests
+11-07 11:03:26.176 13311 13325 I TestRunner: started: boundedRawDecodeMatchesFullPrecisionAreaScaling(com.spektralab.android.NativeImportTest)
+11-07 11:03:26.183 13311 13325 I SpektraNative: linear import 64x64: float32, no Bitmap input
+11-07 11:03:26.186 13311 13325 I SpektraNative: linear import 19x19: float32, no Bitmap input
+11-07 11:03:26.189 13311 13325 I TestRunner: finished: boundedRawDecodeMatchesFullPrecisionAreaScaling(com.spektralab.android.NativeImportTest)
+11-07 11:03:26.196 13311 13325 I TestRunner: started: malformedRawReturnsAnErrorAndNextImportStillWorks(com.spektralab.android.NativeImportTest)
+11-07 11:03:26.204 13311 13325 I SpektraNative: linear import 2x1: float32, no Bitmap input
+11-07 11:03:26.205 13311 13325 I TestRunner: finished: malformedRawReturnsAnErrorAndNextImportStillWorks(com.spektralab.android.NativeImportTest)
+11-07 11:03:26.206 13311 13325 I TestRunner: started: floatHighlightsReachFilmBeforeDisplayClipsThem(com.spektralab.android.NativeImportTest)
+11-07 11:03:26.305 13311 13325 I SpektraNative: engine ready: 25 films, 9 papers, fonts 133600/135204/132372/331992 bytes
+11-07 11:03:26.306 13311 13325 I SpektraNative: linear import 2x1: float32, no Bitmap input
+11-07 11:03:26.310 13311 13325 I TestRunner: finished: floatHighlightsReachFilmBeforeDisplayClipsThem(com.spektralab.android.NativeImportTest)
+11-07 11:03:26.311 13311 13325 I TestRunner: started: availableCameraRawFixturesDecodeAtPreviewAndExportTiers(com.spektralab.android.NativeImportTest)
+11-07 11:03:26.313 13311 13325 I SpektraImportTest: External fixtures dir=/data/user/0/com.spektralab.android.dev/cache/raw-fixtures readable=true count=15
+11-07 11:03:26.313 13311 13325 I SpektraImportTest: BEGIN canon-7d.CR2 bytes=25155690
+11-07 11:03:29.683 13311 13325 I SpektraNative: linear import 640x426: float32, no Bitmap input
+11-07 11:03:33.063 13311 13325 I SpektraNative: linear import 1024x682: float32, no Bitmap input
+11-07 11:03:33.235 13311 13325 I SpektraImportTest: PASS canon-7d.CR2: preview=640x426 3370ms, export=1024x682 3380ms, float film render + JPEG OK
+11-07 11:03:33.235 13311 13325 I SpektraImportTest: BEGIN canon-r6.CR3 bytes=5273174
+11-07 11:03:34.628 13311 13325 I SpektraNative: linear import 640x427: float32, no Bitmap input
+11-07 11:03:36.023 13311 13325 I SpektraNative: linear import 1024x683: float32, no Bitmap input
+11-07 11:03:36.197 13311 13325 I SpektraImportTest: PASS canon-r6.CR3: preview=640x427 1393ms, export=1024x683 1395ms, float film render + JPEG OK
+11-07 11:03:36.197 13311 13325 I SpektraImportTest: BEGIN new-nikon-z6iii.NEF bytes=6520320
+11-07 11:03:38.448 13311 13325 I SpektraNative: linear import 640x428: float32, no Bitmap input
+11-07 11:03:40.670 13311 13325 I SpektraNative: linear import 1024x684: float32, no Bitmap input
+11-07 11:03:40.843 13311 13325 I SpektraImportTest: PASS new-nikon-z6iii.NEF: preview=640x428 2251ms, export=1024x684 2222ms, float film render + JPEG OK
+11-07 11:03:40.843 13311 13325 I SpektraImportTest: BEGIN new-nikon-z8.NEF bytes=35744768
+11-07 11:03:50.710 13311 13325 I SpektraNative: linear import 640x427: float32, no Bitmap input
+11-07 11:04:00.543 13311 13325 I SpektraNative: linear import 1024x683: float32, no Bitmap input
+11-07 11:04:00.718 13311 13325 I SpektraImportTest: PASS new-nikon-z8.NEF: preview=640x427 9867ms, export=1024x683 9833ms, float film render + JPEG OK
+11-07 11:04:00.718 13311 13325 I SpektraImportTest: BEGIN new-nikon-z9.NEF bytes=24839168
+11-07 11:04:10.272 13311 13325 I SpektraNative: linear import 640x427: float32, no Bitmap input
+11-07 11:04:19.770 13311 13325 I SpektraNative: linear import 1024x683: float32, no Bitmap input
+11-07 11:04:19.953 13311 13325 I SpektraImportTest: PASS new-nikon-z9.NEF: preview=640x427 9554ms, export=1024x683 9498ms, float film render + JPEG OK
+11-07 11:04:19.953 13311 13325 I SpektraImportTest: BEGIN new-sony-a1.ARW bytes=63216896
+11-07 11:04:28.272 13311 13325 I SpektraNative: linear import 640x427: float32, no Bitmap input
+11-07 11:04:36.563 13311 13325 I SpektraNative: linear import 1024x684: float32, no Bitmap input
+11-07 11:04:36.742 13311 13325 I SpektraImportTest: PASS new-sony-a1.ARW: preview=640x427 8319ms, export=1024x684 8291ms, float film render + JPEG OK
+11-07 11:04:36.743 13311 13325 I SpektraImportTest: BEGIN new-sony-a1m2.ARW bytes=26099712
+11-07 11:04:37.572 13311 13325 I SpektraNative: linear import 640x427: float32, no Bitmap input
+11-07 11:04:38.364 13311 13325 I SpektraNative: linear import 1024x684: float32, no Bitmap input
+11-07 11:04:38.537 13311 13325 I SpektraImportTest: PASS new-sony-a1m2.ARW: preview=640x427 829ms, export=1024x684 792ms, float film render + JPEG OK
+11-07 11:04:38.537 13311 13325 I SpektraImportTest: BEGIN new-sony-a7m4.ARW bytes=34177024
+11-07 11:04:40.954 13311 13325 I SpektraNative: linear import 640x427: float32, no Bitmap input
+11-07 11:04:43.356 13311 13325 I SpektraNative: linear import 1024x684: float32, no Bitmap input
+11-07 11:04:43.533 13311 13325 I SpektraImportTest: PASS new-sony-a7m4.ARW: preview=640x427 2417ms, export=1024x684 2402ms, float film render + JPEG OK
+11-07 11:04:43.533 13311 13325 I SpektraImportTest: BEGIN new-sony-a7m5.ARW bytes=11481088
+11-07 11:04:47.316 13311 13325 I SpektraNative: linear import 640x427: float32, no Bitmap input
+11-07 11:04:51.095 13311 13325 I SpektraNative: linear import 1024x683: float32, no Bitmap input
+11-07 11:04:51.266 13311 13325 I SpektraImportTest: PASS new-sony-a7m5.ARW: preview=640x427 3783ms, export=1024x683 3779ms, float film render + JPEG OK
+11-07 11:04:51.266 13311 13325 I SpektraImportTest: BEGIN new-sony-a7r5.ARW bytes=42364928
+11-07 11:04:52.313 13311 13325 I SpektraNative: linear import 640x426: float32, no Bitmap input
+11-07 11:04:53.320 13311 13325 I SpektraNative: linear import 1024x682: float32, no Bitmap input
+11-07 11:04:53.494 13311 13325 I SpektraImportTest: PASS new-sony-a7r5.ARW: preview=640x426 1047ms, export=1024x682 1007ms, float film render + JPEG OK
+11-07 11:04:53.494 13311 13325 I SpektraImportTest: BEGIN new-sony-a7r6-apsc-hq.ARW bytes=29720576
+11-07 11:05:01.166 13311 13325 I SpektraNative: linear import 640x427: float32, no Bitmap input
+11-07 11:05:08.831 13311 13325 I SpektraNative: linear import 1024x683: float32, no Bitmap input
+11-07 11:05:09.009 13311 13325 I SpektraImportTest: PASS new-sony-a7r6-apsc-hq.ARW: preview=640x427 7672ms, export=1024x683 7665ms, float film render + JPEG OK
+11-07 11:05:09.009 13311 13325 I SpektraImportTest: BEGIN new-sony-a7r6-ff-lossless.ARW bytes=100851712
+11-07 11:05:21.131 13311 13325 I SpektraNative: linear import 640x427: float32, no Bitmap input
+11-07 11:05:33.262 13311 13325 I SpektraNative: linear import 1024x683: float32, no Bitmap input
+11-07 11:05:33.439 13311 13325 I SpektraImportTest: PASS new-sony-a7r6-ff-lossless.ARW: preview=640x427 12122ms, export=1024x683 12131ms, float film render + JPEG OK
+11-07 11:05:33.439 13311 13325 I SpektraImportTest: BEGIN nikon-d1.NEF bytes=4055474
+11-07 11:05:33.884 13311 13325 I SpektraNative: linear import 640x421: float32, no Bitmap input
+11-07 11:05:34.330 13311 13325 I SpektraNative: linear import 1024x674: float32, no Bitmap input
+11-07 11:05:34.503 13311 13325 I SpektraImportTest: PASS nikon-d1.NEF: preview=640x421 445ms, export=1024x674 446ms, float film render + JPEG OK
+11-07 11:05:34.503 13311 13325 I SpektraImportTest: BEGIN sony-a300.ARW bytes=10519152
+11-07 11:05:36.352 13311 13325 I SpektraNative: linear import 640x430: float32, no Bitmap input
+11-07 11:05:38.201 13311 13325 I SpektraNative: linear import 1024x688: float32, no Bitmap input
+11-07 11:05:38.375 13311 13325 I SpektraImportTest: PASS sony-a300.ARW: preview=640x430 1849ms, export=1024x688 1849ms, float film render + JPEG OK
+11-07 11:05:38.375 13311 13325 I SpektraImportTest: BEGIN test-small.DNG bytes=6611520
+11-07 11:05:39.251 13311 13325 I SpektraNative: linear import 640x480: float32, no Bitmap input
+11-07 11:05:40.126 13311 13325 I SpektraNative: linear import 1024x767: float32, no Bitmap input
+11-07 11:05:40.319 13311 13325 I SpektraImportTest: PASS test-small.DNG: preview=640x480 876ms, export=1024x767 875ms, float film render + JPEG OK
+11-07 11:05:40.320 13311 13325 I SpektraImportTest: External camera RAW fixtures tested=15 failures=0
+11-07 11:05:40.320 13311 13325 I TestRunner: finished: availableCameraRawFixturesDecodeAtPreviewAndExportTiers(com.spektralab.android.NativeImportTest)
+11-07 11:05:40.321 13311 13325 I TestRunner: started: dngDecodesSensorSamplesAndFeedsFilm(com.spektralab.android.NativeImportTest)
+11-07 11:05:40.323 13311 13325 I SpektraNative: linear import 32x32: float32, no Bitmap input
+11-07 11:05:40.327 13311 13325 I TestRunner: finished: dngDecodesSensorSamplesAndFeedsFilm(com.spektralab.android.NativeImportTest)
+11-07 11:05:40.328 13311 13325 I TestRunner: started: adjacent16BitCodesRemainDistinctThroughNativeScaling(com.spektralab.android.NativeImportTest)
+11-07 11:05:40.329 13311 13325 I SpektraNative: linear import 2x1: float32, no Bitmap input
+11-07 11:05:40.330 13311 13325 I TestRunner: finished: adjacent16BitCodesRemainDistinctThroughNativeScaling(com.spektralab.android.NativeImportTest)
+11-07 11:05:40.331 13311 13325 I TestRunner: started: commonTiffCompressionAndOrientationAgree(com.spektralab.android.NativeImportTest)
+11-07 11:05:40.331 13311 13325 I SpektraNative: linear import 2x3: float32, no Bitmap input
+11-07 11:05:40.332 13311 13325 I SpektraNative: linear import 2x3: float32, no Bitmap input
+11-07 11:05:40.332 13311 13325 I SpektraNative: linear import 2x3: float32, no Bitmap input
+11-07 11:05:40.332 13311 13325 I SpektraNative: linear import 2x3: float32, no Bitmap input
+11-07 11:05:40.332 13311 13325 I TestRunner: finished: commonTiffCompressionAndOrientationAgree(com.spektralab.android.NativeImportTest)
+11-07 11:05:40.332 13311 13325 I TestRunner: started: bigEndian16BitGreyAndSourceCloseAreSafe(com.spektralab.android.NativeImportTest)
+11-07 11:05:40.333 13311 13325 I SpektraNative: linear import 2x1: float32, no Bitmap input
+11-07 11:05:40.333 13311 13325 I TestRunner: finished: bigEndian16BitGreyAndSourceCloseAreSafe(com.spektralab.android.NativeImportTest)
+11-07 11:05:40.334 13311 13325 I TestRunner: started: filmCanvasAndDateSurviveJniAndCachedPrintEdits(com.spektralab.android.AndroidEngineTest)
+11-07 11:05:40.414 13311 13325 I TestRunner: finished: filmCanvasAndDateSurviveJniAndCachedPrintEdits(com.spektralab.android.AndroidEngineTest)
+11-07 11:05:40.414 13311 13325 I TestRunner: started: reportPublicCameraAccessWithoutGuessingHiddenIds(com.spektralab.android.AndroidEngineTest)
+11-07 11:05:40.455 13311 13325 I TestRunner: finished: reportPublicCameraAccessWithoutGuessingHiddenIds(com.spektralab.android.AndroidEngineTest)
+11-07 11:05:40.455 13311 13325 I TestRunner: run finished: 10 tests, 0 failed, 0 ignored

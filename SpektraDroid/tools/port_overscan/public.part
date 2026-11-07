@@ -1,0 +1,256 @@
+
+bool overscan_gate_mm(const std::string& format, double& gate_long, double& gate_short) {
+    const Format* f = find_format(format);
+    if (!f) return false;
+    gate_long = std::max(f->along, f->across);
+    gate_short = std::min(f->along, f->across);
+    return true;
+}
+
+void overscan_gate_crop(const std::string& format, int w, int h, int& cx, int& cy, int& cw, int& ch) {
+    cx = 0; cy = 0; cw = w; ch = h;
+    double gl, gs;
+    if (w <= 0 || h <= 0 || !overscan_gate_mm(format, gl, gs)) return;
+    // the picture's orientation is the camera's: a landscape picture takes the gate landscape
+    const double target = w >= h ? gl / gs : gs / gl;
+    const double r = double(w) / double(h);
+    if (std::fabs(r / target - 1.0) < 0.002) return;
+    if (r > target) { cw = std::max(1, int(std::lround(h * target))); cx = (w - cw) / 2; }
+    else            { ch = std::max(1, int(std::lround(w / target))); cy = (h - ch) / 2; }
+}
+
+void overscan_colours(const EngineData& data, const FilmProfile& film, int scan_view_illu,
+                      const float scan_xyz_to_rgb[9], OverscanLayout& L) {
+    // --- light colours, through this film's own sensitivity ----------------
+    const double rear[3] = {1.0, 1.0, 0.0}, front[3] = {1.0, 1.0, 1.0};
+    const double* edge_t = edge_look_for(film.stock).layer;   // the maker's edge printer
+    light_weights(data, film, 2800.0, false, front, L.fog_rgb);
+    light_weights(data, film, 2700.0, true, rear, L.date_rgb);
+    light_weights(data, film, 4500.0, false, edge_t, L.edge_rgb);
+
+    // --- the hole: the cmy that cancels this film's base (least squares) ----
+    {
+        const std::vector<float>& chd = film.channel_density;
+        const std::vector<float>& base = film.base_density;
+        double AtA[3][3] = {{0}}, Atb[3] = {0};
+        for (size_t l = 0; l < base.size() && 3 * l + 2 < chd.size(); ++l) {
+            const double b = base[l];
+            if (!std::isfinite(b)) continue;
+            double a[3];
+            bool ok = true;
+            for (int k = 0; k < 3; ++k) { a[k] = chd[3 * l + size_t(k)]; ok = ok && std::isfinite(a[k]); }
+            if (!ok) continue;
+            for (int i = 0; i < 3; ++i) {
+                Atb[i] += a[i] * (-b);
+                for (int j = 0; j < 3; ++j) AtA[i][j] += a[i] * a[j];
+            }
+        }
+        auto det3 = [](double m[3][3]) {
+            return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                   m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        };
+        const double D = det3(AtA);
+        for (int k = 0; k < 3; ++k) {
+            double M[3][3];
+            std::memcpy(M, AtA, sizeof M);
+            for (int i = 0; i < 3; ++i) M[i][k] = Atb[i];
+            L.hole_cmy[k] = std::fabs(D) > 1e-12 ? det3(M) / D : 0.0;
+        }
+    }
+
+    // --- the base's own colour in the scan: its spectral density through the
+    // scan's light, in the picture's white balance
+    if (scan_view_illu >= 0 && size_t(scan_view_illu) < data.illuminants.size() && scan_xyz_to_rgb) {
+        const std::vector<float>& view = data.illuminants[size_t(scan_view_illu)].values;
+        const std::vector<float>& base = film.base_density;
+        const std::vector<float>& cmfs = data.cmfs;
+        if (view.size() == base.size() && cmfs.size() >= 3 * view.size()) {
+            double xyz[3] = {0, 0, 0}, vy = 0.0;
+            for (size_t i = 0; i < view.size(); ++i) {
+                const double tr = std::isfinite(base[i]) ? std::pow(10.0, -double(base[i])) : 1.0;
+                for (int k = 0; k < 3; ++k) xyz[k] += view[i] * tr * cmfs[3 * i + size_t(k)];
+                vy += view[i] * cmfs[3 * i + 1];
+            }
+            if (vy > 0) {
+                for (double& v : xyz) v /= vy;
+                for (int r = 0; r < 3; ++r)
+                    L.base_rgb[r] = clamp01(scan_xyz_to_rgb[3 * r] * xyz[0] + scan_xyz_to_rgb[3 * r + 1] * xyz[1] +
+                                            scan_xyz_to_rgb[3 * r + 2] * xyz[2]);
+            }
+        }
+    }
+}
+
+void overscan_identity(double px_mm, uint32_t w, uint32_t h, const EngineData& data, const FilmProfile& film,
+                       OverscanLayout& L) {
+    L = OverscanLayout{};
+    L.px = px_mm;
+    L.canvas_w = w; L.canvas_h = h;
+    L.frame_w = w; L.frame_h = h;
+    L.A[0] = 1; L.A[1] = 0; L.A[2] = 0; L.A[3] = 1;
+    L.cu = 0; L.cv = 0; L.cs = 0; L.ct = 0;
+    const double rear[3] = {1.0, 1.0, 0.0};
+    light_weights(data, film, 2700.0, true, rear, L.date_rgb);
+}
+
+// (1) + (2) + the fog of (3): overscan.metal `spk_overscan_canvas`.
+void overscan_canvas(const OverscanLayout& L, const float* const frame[3], float* const canvas[3]) {
+    const uint32_t cw = L.canvas_w, ch = L.canvas_h;
+    const double W = L.film_w, px = L.px;
+    parallel_for(int(ch), [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y)
+            for (uint32_t x = 0; x < cw; ++x) {
+                double ss, st;
+                canvas_to_film(L, double(x), double(y), ss, st);
+                double e[3] = {0, 0, 0};
+                if (L.carrier_none || (st >= 0.0 && st <= W)) {
+                    const double d_gate = gate_sdf(L, ss, st);
+                    const double cov = penumbra(d_gate, L.penumbra);
+                    if (cov > 0.0) {
+                        double fx, fy, f[3];
+                        if (!L.vertical) { fx = (ss - L.gate_s0) / px - 0.5; fy = (st - L.gate_t0) / px - 0.5; }
+                        else             { fx = (L.gate_t0 + L.gate_across - st) / px - 0.5; fy = (ss - L.gate_s0) / px - 0.5; }
+                        sample_frame(frame, fx, fy, L.frame_w, L.frame_h, f);
+                        for (int c = 0; c < 3; ++c) e[c] += cov * f[c];
+                    }
+                    // Gate flare: the gate's bevelled edge reflects scene light onto
+                    // the film just outside the frame.
+                    if (L.flare_amp > 0.0 && d_gate > -0.02 && d_gate < 6.0 * L.flare_width) {
+                        const double in_s = std::clamp(ss, L.gate_s0 + 0.12, L.gate_s0 + L.gate_along - 0.12);
+                        const double in_t = std::clamp(st, L.gate_t0 + 0.12, L.gate_t0 + L.gate_across - 0.12);
+                        double fx, fy, f[3];
+                        if (!L.vertical) { fx = (in_s - L.gate_s0) / px - 0.5; fy = (in_t - L.gate_t0) / px - 0.5; }
+                        else             { fx = (L.gate_t0 + L.gate_across - in_t) / px - 0.5; fy = (in_s - L.gate_s0) / px - 0.5; }
+                        sample_frame(frame, fx, fy, L.frame_w, L.frame_h, f);
+                        const double prof = std::exp(-std::max(d_gate, 0.0) / L.flare_width);
+                        for (int c = 0; c < 3; ++c) e[c] += L.flare_amp * prof * f[c];
+                    }
+                    // Edge fog, and the spool's leaks.
+                    const double d_top = std::max(st, 0.0), d_bot = std::max(W - st, 0.0);
+                    const double period = std::max(L.fog_period, 0.1);
+                    const double nz = 0.6 * value_noise(ss / period, L.fog_seed) +
+                                      0.4 * value_noise(ss / (0.37 * period), L.fog_seed ^ 0xA5A5A5A5u);
+                    double fog = L.fog_amp * std::exp(-std::min(d_top, d_bot) / std::max(L.fog_width, 1e-3)) * (0.3 + 0.7 * nz);
+                    for (const OverscanLayout::Leak& lk : L.leaks) {
+                        const double dd = lk.side == 0 ? d_top : d_bot;
+                        const double ds = ss - lk.s;
+                        fog += lk.amp * std::exp(-ds * ds / (2.0 * lk.sig_s * lk.sig_s)) * std::exp(-dd / lk.sig_t);
+                    }
+                    for (int c = 0; c < 3; ++c) e[c] += fog * L.fog_rgb[c];
+                }
+                const size_t i = size_t(y) * cw + x;
+                for (int c = 0; c < 3; ++c) canvas[c][i] = float(e[c]);
+            }
+    });
+}
+
+// (3): node_overscan's imprint half -- the groups, rasterised and added.
+void overscan_imprints(const OverscanLayout& L, const OverscanParams& o, const DateImprintParams& d,
+                       const std::string& stock, double frame_w_mm, double frame_h_mm,
+                       const FontLib* fonts, float* const planes[3]) {
+    Faces faces;
+    if (fonts) {
+        faces.regular.init(fonts->regular);
+        faces.bold.init(fonts->bold);
+        faces.condensed.init(fonts->condensed);
+        faces.mono_bold.init(fonts->mono_bold);
+    }
+    struct Scope { explicit Scope(const Faces* f) { g_faces = f; } ~Scope() { g_faces = nullptr; } } scope(&faces);
+    Params params;
+    params.film_render.overscan = o;
+    params.film_render.date_imprint = d;
+    params.film.info.stock = stock;
+    std::vector<Group> groups;
+    imprint_groups(L, params, frame_w_mm, frame_h_mm, groups);
+    const size_t cw = L.canvas_w;
+    for (const Group& g : groups) {
+        std::vector<float> cov;
+        int x0, y0, w, h;
+        if (!rasterise(L, g, cov, x0, y0, w, h)) continue;
+        parallel_for(h, [&](int ya, int yb) {
+            for (int y = ya; y < yb; ++y)
+                for (int x = 0; x < w; ++x) {
+                    const float c = cov[size_t(y) * size_t(w) + size_t(x)];
+                    if (c <= 0.0f) continue;
+                    const size_t i = size_t(y0 + y) * cw + size_t(x0 + x);
+                    for (int k = 0; k < 3; ++k) planes[k][i] += float(c * g.exposure[k]);
+                }
+        });
+    }
+}
+
+// (4): overscan.metal `spk_overscan_film_present`.
+void overscan_film_present(const OverscanLayout& L, float* const cmy[3]) {
+    const uint32_t cw = L.canvas_w;
+    parallel_for(int(L.canvas_h), [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y)
+            for (uint32_t x = 0; x < cw; ++x) {
+                double ss, st;
+                canvas_to_film(L, double(x), double(y), ss, st);
+                const double a = film_alpha(L, ss, st);
+                if (a >= 1.0) continue;
+                const size_t i = size_t(y) * cw + x;
+                for (int c = 0; c < 3; ++c) cmy[c][i] = float(a * cmy[c][i] + (1.0 - a) * L.hole_cmy[c]);
+            }
+    });
+}
+
+// (5): overscan.metal `spk_overscan_light`.
+void overscan_light(const OverscanLayout& L, float* const rgb[3]) {
+    const uint32_t cw = L.canvas_w;
+    const double carrier = L.carrier_none ? 2.0 : (L.carrier_open ? 1.0 : 0.0);
+    parallel_for(int(L.canvas_h), [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y)
+            for (uint32_t x = 0; x < cw; ++x) {
+                double ss, st;
+                canvas_to_film(L, double(x), double(y), ss, st);
+                const size_t i = size_t(y) * cw + x;
+                const double a = film_alpha(L, ss, st);
+                const bool white = L.holes_light;
+                double light[3] = {L.light_rgb[0], L.light_rgb[1], L.light_rgb[2]};
+                double c[3] = {rgb[0][i], rgb[1][i], rgb[2][i]};
+                if (L.perforated) {
+                    uint32_t hole;
+                    const double d = perf_sdf(L, ss, st, hole);
+                    const uint32_t seed = L.perf_seed;
+                    const int h = int(hole & 0xFFFFu);
+                    if (d > -0.03 && d < 0.15) {
+                        const double e = 0.003;
+                        uint32_t hh;
+                        const double gx = perf_sdf(L, ss + e, st, hh) - perf_sdf(L, ss - e, st, hh);
+                        const double gy = perf_sdf(L, ss, st + e, hh) - perf_sdf(L, ss, st - e, hh);
+                        const double gl = std::max(std::hypot(gx, gy), 1e-6);
+                        const double nx = gx / gl, ny = gy / gl;
+                        const double per_hole = 0.4 + 0.6 * hash_f(h, seed ^ 0xE1u);
+                        const double pn = 0.5 * (value_noise(ss / 0.35, seed ^ uint32_t(h)) +
+                                                 value_noise(st / 0.35, seed ^ uint32_t(h) ^ 0x3Cu));
+                        const double tt = clamp01((pn - 0.25) / 0.5);
+                        const double patch = tt * tt * (3.0 - 2.0 * tt);
+                        const double side = 0.6 + 0.8 * std::max(0.0, nx * L.wall_tilt[0] + ny * L.wall_tilt[1]);
+                        const double k = per_hole * patch * side;
+                        double tint[3];
+                        for (int q = 0; q < 3; ++q) tint[q] = 1.0 + (L.base_rgb[q] - 1.0) * 0.3;
+                        if (d >= 0.0) {
+                            const double lift = L.wall_glow * k * std::exp(-d / L.wall_scatter);
+                            for (int q = 0; q < 3; ++q) c[q] += lift * tint[q] * (white ? light[q] : 1.0);
+                        } else if (white && hash_f(h, seed ^ 0xE4u) < 0.5) {
+                            for (int q = 0; q < 3; ++q) light[q] *= 1.0 - 0.12 * k * (1.0 - tint[q]) * std::exp(d / 0.012);
+                        }
+                    }
+                    if (white && d >= 0.0) {
+                        const double fl = 0.012 * hash_f(h, seed ^ 0xC4u) * (hash_f(h, seed ^ 0xC5u) >= 0.5 ? 1.0 : 0.0);
+                        for (int q = 0; q < 3; ++q) c[q] += fl * std::exp(-d / 0.025) * light[q];
+                    }
+                }
+                const double W = L.film_w;
+                const double on_strip = L.carrier_none ? 1.0 : clamp01(std::min(st, W - st) / L.px + 0.5);
+                const double in_film = on_strip > 0.0 ? a / on_strip : 0.0;
+                for (int q = 0; q < 3; ++q) {
+                    const double m = light[q] + (c[q] - light[q]) * in_film;
+                    rgb[q][i] = float(carrier + (m - carrier) * on_strip);
+                }
+            }
+    });
+}
+
+}  // namespace spk

@@ -582,6 +582,7 @@ struct RNG {
 struct Engine::Impl {
     const EngineData& data;
     const Cam16Setup& cam16;
+    const FontLib* fonts;
 
     std::string film_key;
     std::unique_ptr<FilmSetup> film;
@@ -595,7 +596,7 @@ struct Engine::Impl {
     std::vector<float> neg[3];
     double neg_pixel_um = 0;
 
-    Impl(const EngineData& d, const Cam16Setup& c) : data(d), cam16(c) {}
+    Impl(const EngineData& d, const Cam16Setup& c, const FontLib* f) : data(d), cam16(c), fonts(f) {}
 
     void setup(const RenderParams& p) {
         const FilmProfile* f = data.film(p.film_stock);
@@ -681,27 +682,53 @@ struct Engine::Impl {
     }
 
     // -- filming.expose ---------------------------------------------------
-    void expose(const float* rgb, int w, int h, const RenderParams& p, double pixel_um,
-                float* ch[3], const CancelFn* cancel, const TapFn& tap) {
+    // `L`: the Film Edge canvas (valid) or the bare frame's identity layout
+    // for the date alone; null for neither. `ch` holds the output's planes:
+    // the canvas's with Film Edge, the frame's (w x h) otherwise.
+    void expose(const float* rgb, int fw, int fh, const RenderParams& p, double pixel_um,
+                const OverscanLayout* L, float* ch[3], const CancelFn* cancel, const TapFn& tap) {
         const FilmProfile& f = *film->film;
-        const size_t np = (size_t)w * h;
-        const double ae = p.auto_exposure ? auto_exposure_ev(rgb, w, h) : 0.0;
+        const bool canvas = L && L->valid;
+        // metering and the boost are statistics of the frame: taken before
+        // the canvas exists (RFC-032 §27)
+        const double ae = p.auto_exposure ? auto_exposure_ev(rgb, fw, fh) : 0.0;
         const double gain = std::pow(2.0, ae);
         const double comp = std::pow(2.0, (double)p.exposure_ev);
-        parallel_for(h, [&](int y0, int y1) {
+        std::vector<float> frame_planes[3];
+        float* frame[3] = {ch[0], ch[1], ch[2]};
+        if (canvas) {
+            for (int c = 0; c < 3; c++) { frame_planes[c].resize((size_t)fw * fh); frame[c] = frame_planes[c].data(); }
+        }
+        parallel_for(fh, [&](int y0, int y1) {
             for (int y = y0; y < y1; y++) {
-                for (int x = 0; x < w; x++) {
-                    const size_t i = (size_t)y * w + x;
+                for (int x = 0; x < fw; x++) {
+                    const size_t i = (size_t)y * fw + x;
                     const double in[3] = {rgb[i * 3] * gain, rgb[i * 3 + 1] * gain, rgb[i * 3 + 2] * gain};
                     double raw[3];
                     rgb_to_raw(f, in, raw);
-                    ch[0][i] = (float)(raw[0] * comp);
-                    ch[1][i] = (float)(raw[1] * comp);
-                    ch[2][i] = (float)(raw[2] * comp);
+                    frame[0][i] = (float)(raw[0] * comp);
+                    frame[1][i] = (float)(raw[1] * comp);
+                    frame[2][i] = (float)(raw[2] * comp);
                 }
             }
         });
         check_cancel(cancel);
+        int w = fw, h = fh;
+        if (canvas) {
+            // the film around the frame, built on the raw exposure, before halation
+            const float* fp[3] = {frame[0], frame[1], frame[2]};
+            overscan_canvas(*L, fp, ch);
+            for (auto& v : frame_planes) std::vector<float>().swap(v);
+            w = (int)L->canvas_w;
+            h = (int)L->canvas_h;
+            check_cancel(cancel);
+        }
+        if (L && (canvas || p.date.active)) {
+            const double px_mm = pixel_um / 1000.0;
+            overscan_imprints(*L, p.overscan, p.date, f.stock, fw * px_mm, fh * px_mm, fonts, ch);
+            check_cancel(cancel);
+        }
+        const size_t np = (size_t)w * h;
 
         // model/diffusion.apply_halation_um
         if (p.halation_active) {
@@ -930,7 +957,7 @@ struct Engine::Impl {
 
     // -- scanning.scan ---------------------------------------------------------
     void scan_stage(int w, int h, const RenderParams& p, float* ch[3], uint8_t* out,
-                    const CancelFn* cancel, const TapFn& tap) {
+                    const CancelFn* cancel, const TapFn& tap, const OverscanLayout* L = nullptr) {
         const size_t np = (size_t)w * h;
         // model/glare.add_glare (print scans only)
         std::vector<float> glare;
@@ -985,6 +1012,10 @@ struct Engine::Impl {
                 for (size_t i = 0; i < np; i++) ch[c][i] = ch[c][i] + a * (ch[c][i] - blur.v[i]);
             }
         }
+        // The scan's view of the holes goes on after the scanner's sharpening,
+        // not before it: before, the unsharp mask undershot the step to the
+        // scan's light into a black ring round every perforation (RFC-032).
+        if (L && L->valid) overscan_light(*L, ch);
         if (tap) tap("rgb_out_linear", ch[0], ch[1], ch[2], w, h);
         if (!out) return;
         parallel_for(h, [&](int y0, int y1) {
@@ -1007,19 +1038,67 @@ struct Engine::Impl {
           << p.halation_amount << '|' << p.scatter_amount << '|' << p.dir_couplers_active << '|'
           << p.dir_couplers_amount << '|' << p.grain_active << '|' << p.grain_sublayers << '|'
           << p.grain_amount << '|' << p.seed;
+        // Film Edge and the date back are exposure on the negative
+        const OverscanParams& o = p.overscan;
+        if (o.active)
+            k << "|os:" << o.format << ',' << o.mode << ',' << o.camera_seed << ',' << o.frame_seed << ','
+              << o.fog << ',' << o.leaks << ',' << o.edge_text << ',' << o.f_number << ',' << o.gate << ','
+              << o.holes << ',' << o.frame_number << ',' << o.carrier;
+        const DateImprintParams& d = p.date;
+        if (d.active)
+            k << "|date:" << d.text << ',' << d.data_text << ',' << d.placement << ',' << d.exposure_ev << ','
+              << d.style << ',' << d.size << ',' << d.corner << ',' << d.inset_x << ',' << d.inset_y << ','
+              << d.data_in_frame << (o.active ? "" : ("," + o.format));
         return k.str();
     }
 
-    void render(const float* rgb, int w, int h, int64_t source_id, const RenderParams& p,
+    void render(const float* rgb_in, int w_in, int h_in, int64_t source_id, const RenderParams& p,
                 uint8_t* out, const CancelFn* cancel, const TapFn& tap) {
         setup(p);
         check_cancel(cancel);
-        const size_t np = (size_t)w * h;
-        // ResizingService.crop_and_rescale: pixel pitch from the long edge
-        const double pixel_um = p.film_format_mm * 1000.0 / std::max(w, h);
+        // Film Edge: the frame is the gate, so the picture is cut to its shape
+        // (centred) before anything is measured on it.
+        const bool ov = p.overscan.active;
+        const float* rgb = rgb_in;
+        int w = w_in, h = h_in;
+        std::vector<float> cut;
+        if (ov) {
+            int cx, cy, cw, chh;
+            overscan_gate_crop(p.overscan.format, w_in, h_in, cx, cy, cw, chh);
+            if (cw != w_in || chh != h_in) {
+                cut.resize((size_t)cw * chh * 3);
+                for (int y = 0; y < chh; y++)
+                    std::memcpy(cut.data() + (size_t)y * cw * 3, rgb_in + ((size_t)(y + cy) * w_in + cx) * 3,
+                                (size_t)cw * 3 * sizeof(float));
+                rgb = cut.data();
+                w = cw;
+                h = chh;
+            }
+        }
+        // ResizingService.crop_and_rescale: pixel pitch from the long edge --
+        // with Film Edge, the gate's long edge (Pipeline::set_source_long_edge)
+        double gate_long = 0, gate_short = 0;
+        const double long_mm = ov && overscan_gate_mm(p.overscan.format, gate_long, gate_short)
+                                   ? gate_long : (double)p.film_format_mm;
+        const double pixel_um = long_mm * 1000.0 / std::max(w, h);
+        OverscanLayout L;
+        const OverscanLayout* lp = nullptr;
+        if (ov) {
+            std::string err;
+            if (!overscan_layout(p.overscan, pixel_um / 1000.0, (uint32_t)w, (uint32_t)h, L, err)) throw err;
+            const PaperProfile* paper = p.scan_film ? nullptr : data.paper(p.print_stock);
+            overscan_colours(data, *film->film, paper ? paper->view_illu : film->film->view_illu,
+                             paper ? paper->xyz_to_rgb : film->film->xyz_to_rgb_view, L);
+            lp = &L;
+        } else if (p.date.active) {
+            overscan_identity(pixel_um / 1000.0, (uint32_t)w, (uint32_t)h, data, *film->film, L);
+            lp = &L;
+        }
+        const int W = ov ? (int)L.canvas_w : w, H = ov ? (int)L.canvas_h : h;
+        const size_t np = (size_t)W * H;
         std::vector<float> planes[3];
         float* ch[3];
-        const std::string key = film_side_key(source_id, w, h, p);
+        const std::string key = film_side_key(source_id, w_in, h_in, p);
         const bool reuse = source_id >= 0 && !tap && key == neg_key && neg[0].size() == np;
         if (reuse) {
             for (int c = 0; c < 3; c++) planes[c] = neg[c];
@@ -1028,9 +1107,13 @@ struct Engine::Impl {
             for (auto& n : neg) std::vector<float>().swap(n);
             for (int c = 0; c < 3; c++) planes[c].resize(np);
             for (int c = 0; c < 3; c++) ch[c] = planes[c].data();
-            expose(rgb, w, h, p, pixel_um, ch, cancel, tap);
+            expose(rgb, w, h, p, pixel_um, lp, ch, cancel, tap);
+            std::vector<float>().swap(cut);
             check_cancel(cancel);
-            develop(w, h, p, pixel_um, ch, cancel, tap);
+            develop(W, H, p, pixel_um, ch, cancel, tap);
+            // where there is no film -- the perforations, past the edges -- the
+            // negative's density is the cmy that cancels the base
+            if (ov) overscan_film_present(L, ch);
             // keep the negative for print-side edits (preview sizes only)
             if (source_id >= 0 && np <= (size_t)6000000) {
                 for (int c = 0; c < 3; c++) neg[c] = planes[c];
@@ -1039,14 +1122,32 @@ struct Engine::Impl {
         }
         for (int c = 0; c < 3; c++) ch[c] = planes[c].data();
         check_cancel(cancel);
-        if (!p.scan_film) print_stage(w, h, p, ch, tap);
+        if (!p.scan_film) print_stage(W, H, p, ch, tap);
         check_cancel(cancel);
-        scan_stage(w, h, p, ch, out, cancel, tap);
+        scan_stage(W, H, p, ch, out, cancel, tap, ov ? &L : nullptr);
     }
 };
 
-Engine::Engine(const EngineData& data, const Cam16Setup& cam16)
-    : impl_(std::make_unique<Impl>(data, cam16)) {}
+bool render_output_size(int w, int h, const RenderParams& p, int& out_w, int& out_h, std::string& error) {
+    out_w = w;
+    out_h = h;
+    if (!p.overscan.active) return true;
+    int cx, cy, cw, ch;
+    overscan_gate_crop(p.overscan.format, w, h, cx, cy, cw, ch);
+    double gate_long = 0, gate_short = 0;
+    if (!overscan_gate_mm(p.overscan.format, gate_long, gate_short)) {
+        error = "overscan: unknown format '" + p.overscan.format + "'";
+        return false;
+    }
+    OverscanLayout L;
+    if (!overscan_layout(p.overscan, gate_long / std::max(cw, ch), (uint32_t)cw, (uint32_t)ch, L, error)) return false;
+    out_w = (int)L.canvas_w;
+    out_h = (int)L.canvas_h;
+    return true;
+}
+
+Engine::Engine(const EngineData& data, const Cam16Setup& cam16, const FontLib* fonts)
+    : impl_(std::make_unique<Impl>(data, cam16, fonts)) {}
 
 Engine::~Engine() = default;
 

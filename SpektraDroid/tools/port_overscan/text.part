@@ -1,0 +1,129 @@
+
+// ---------------------------------------------------------------------------
+// Android: the edge print's faces, replacing CoreText. Each of the desktop
+// engine's fonts maps to a free one, sized so its caps stand as tall as the
+// original's at the same `size_mm` (the layouts give sizes as cap / cap-per-em
+// of the original face, measured on the strips by cap height).
+// ---------------------------------------------------------------------------
+struct Face {
+    stbtt_fontinfo info{};
+    double upm = 1000.0;     // font units per em
+    double cap_em = 0.72;    // cap height per em, measured on 'H'
+    bool ok = false;
+    bool init(const std::vector<uint8_t>& bytes) {
+        if (bytes.empty()) return false;
+        if (!stbtt_InitFont(&info, bytes.data(), stbtt_GetFontOffsetForIndex(bytes.data(), 0))) return false;
+        upm = 1.0 / stbtt_ScaleForMappingEmToPixels(&info, 1.0f);
+        int x0, y0, x1, y1;
+        if (stbtt_GetCodepointBox(&info, 'H', &x0, &y0, &x1, &y1) && y1 > 0) cap_em = double(y1) / upm;
+        ok = true;
+        return true;
+    }
+};
+struct Faces { Face regular, bold, condensed, mono_bold; };
+thread_local const Faces* g_faces = nullptr;
+
+// The original face's cap height per em: Helvetica Neue 0.714 (the layouts'
+// `kCap`), Menlo 0.729, Arial Narrow 0.716.
+const Face* face_for(const char* font, double& cap_ref) {
+    cap_ref = 0.714;
+    if (!g_faces) return nullptr;
+    const std::string f = font ? font : "";
+    if (f == "Menlo-Bold") { cap_ref = 0.729; return &g_faces->mono_bold; }
+    if (f == "ArialNarrow") { cap_ref = 0.716; return &g_faces->condensed; }
+    if (f == "HelveticaNeue-Bold") return &g_faces->bold;
+    return &g_faces->regular;   // HelveticaNeue, HelveticaNeue-Medium
+}
+
+// A Helvetica-family string's advance in film mm, as CoreText lays it out
+// (the desktop engine's `text_width`): advances plus the tracking after each
+// glyph, times `hscale`. A kern attribute is always set, so the font's own
+// kerning is off, as it is under CoreText.
+double text_width(const char* font, double size_mm, const std::string& text, double tracking_mm, double hscale) {
+    double cap_ref;
+    const Face* f = face_for(font, cap_ref);
+    if (!f || !f->ok) return (0.62 * size_mm + tracking_mm) * double(text.size()) * hscale;
+    const double sc = size_mm * cap_ref / f->cap_em / f->upm;
+    double pen = 0.0;
+    for (unsigned char ch : text) {
+        int adv = 0, lsb = 0;
+        stbtt_GetCodepointHMetrics(&f->info, ch, &adv, &lsb);
+        pen += adv * sc + tracking_mm;
+    }
+    return pen * hscale;
+}
+
+// One text op's outlines as closed polylines in film mm. CoreGraphics drew it
+// with the CTM translate(s, t) . rotate(rot) [. scale(hscale, 1) when the
+// advances scale] and the text matrix scale(hscale or 1, -1): t is down,
+// glyphs are up.
+void text_outlines(const Op& op, double tol_mm, std::vector<std::vector<double>>& out) {
+    double cap_ref;
+    const Face* f = face_for(op.font, cap_ref);
+    if (!f || !f->ok) return;
+    const double sc = op.size_mm * cap_ref / f->cap_em / f->upm;
+    const double hs_text = op.scale_advances ? 1.0 : op.hscale, hs_ctm = op.scale_advances ? op.hscale : 1.0;
+    const double r = op.rot_deg * M_PI / 180.0, cr = std::cos(r), sr = std::sin(r);
+    double pen = 0.0;
+    auto map = [&](double gx, double gy, double& s, double& t) {
+        const double x = (pen + gx * sc * hs_text) * hs_ctm, y = -gy * sc;
+        s = op.s + x * cr - y * sr;
+        t = op.t + x * sr + y * cr;
+    };
+    for (unsigned char ch : op.text) {
+        const int g = stbtt_FindGlyphIndex(&f->info, ch);
+        stbtt_vertex* v = nullptr;
+        const int nv = g ? stbtt_GetGlyphShape(&f->info, g, &v) : 0;
+        std::vector<double> cur;
+        double ps = 0, pt = 0;   // the pen in film mm
+        auto close = [&]() {
+            if (cur.size() >= 6) out.push_back(cur);
+            cur.clear();
+        };
+        for (int i = 0; i < nv; ++i) {
+            double s, t;
+            map(v[i].x, v[i].y, s, t);
+            if (v[i].type == STBTT_vmove) {
+                close();
+                cur.push_back(s); cur.push_back(t);
+            } else if (v[i].type == STBTT_vline) {
+                cur.push_back(s); cur.push_back(t);
+            } else {
+                double c0s, c0t, c1s = 0, c1t = 0;
+                map(v[i].cx, v[i].cy, c0s, c0t);
+                const bool cubic = v[i].type == STBTT_vcubic;
+                if (cubic) map(v[i].cx1, v[i].cy1, c1s, c1t);
+                const double len = std::hypot(c0s - ps, c0t - pt) + (cubic ? std::hypot(c1s - c0s, c1t - c0t) + std::hypot(s - c1s, t - c1t)
+                                                                          : std::hypot(s - c0s, t - c0t));
+                const int n = std::clamp(int(std::ceil(len / std::max(tol_mm, 1e-4))), 2, 24);
+                for (int k = 1; k <= n; ++k) {
+                    const double u = double(k) / n, a = 1.0 - u;
+                    double qs, qt;
+                    if (cubic) {
+                        qs = a * a * a * ps + 3 * a * a * u * c0s + 3 * a * u * u * c1s + u * u * u * s;
+                        qt = a * a * a * pt + 3 * a * a * u * c0t + 3 * a * u * u * c1t + u * u * u * t;
+                    } else {
+                        qs = a * a * ps + 2 * a * u * c0s + u * u * s;
+                        qt = a * a * pt + 2 * a * u * c0t + u * u * t;
+                    }
+                    cur.push_back(qs); cur.push_back(qt);
+                }
+            }
+            ps = s; pt = t;
+        }
+        close();
+        if (v) stbtt_FreeShape(&f->info, v);
+        int adv = 0, lsb = 0;
+        stbtt_GetCodepointHMetrics(&f->info, ch, &adv, &lsb);
+        pen += adv * sc + op.tracking_mm;
+    }
+}
+
+// The desktop engine's imprint layout reads `params.film_render.overscan`,
+// `params.film_render.date_imprint` and `params.film.info.stock`; this is that
+// much of its Params.
+struct Params {
+    struct { OverscanParams overscan; DateImprintParams date_imprint; } film_render;
+    struct { struct { std::string stock; } info; } film;
+};
+

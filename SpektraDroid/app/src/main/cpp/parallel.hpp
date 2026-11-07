@@ -30,7 +30,7 @@ public:
     void run(int n, const std::function<void(int, int)>& job, int min_chunk = 16) {
         if (n <= 0) return;
         const int threads = size();
-        if (in_job_ || threads <= 1 || n < 2 * min_chunk) {
+        if (in_job() || threads <= 1 || n < 2 * min_chunk) {
             job(0, n);
             return;
         }
@@ -69,7 +69,7 @@ private:
     }
 
     void work() {
-        in_job_ = true;
+        in_job() = true;
         for (;;) {
             const int c = next_.fetch_add(1);
             const int chunks = chunks_.load();
@@ -83,7 +83,7 @@ private:
             std::lock_guard<std::mutex> lk(m_);
             if (--pending_ == 0) done_cv_.notify_all();
         }
-        in_job_ = false;
+        in_job() = false;
     }
 
     void loop() {
@@ -109,10 +109,13 @@ private:
     std::atomic<int> next_{0};
     unsigned generation_ = 0;
     bool stop_ = false;
-    static thread_local bool in_job_;
+    // A function-local TLS variable also links correctly with Apple Clang's
+    // sanitizer runtime (an out-of-class inline TLS member emits duplicate wrappers).
+    static bool& in_job() {
+        static thread_local bool active = false;
+        return active;
+    }
 };
-
-inline thread_local bool ThreadPool::in_job_ = false;
 
 inline void parallel_for(int n, const std::function<void(int, int)>& job, int min_chunk = 16) {
     ThreadPool::instance().run(n, job, min_chunk);

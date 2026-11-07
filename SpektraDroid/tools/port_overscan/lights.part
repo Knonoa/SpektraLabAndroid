@@ -1,0 +1,48 @@
+
+// Android: `light_weights` as the desktop engine computes it -- sum(L * T *
+// S_c) / sum(L_ref * S_c), normalised so the largest layer is 1 -- with S the
+// film's sensitivity from edge_sensitivity.inc and L a Planck blackbody (its
+// scale cancels in the ratio, as the reference's normalisation does). `rear`
+// zeroes the blue-sensitive layer; `guide` is RFC-031's orange light guide.
+const float* edge_sensitivity_for(const std::string& stock) {
+    for (const EdgeSens& e : kEdgeSens) if (stock == e.stock) return e.s;
+    for (const EdgeSens& e : kEdgeSens) if (std::strcmp(e.stock, "kodak_portra_400") == 0) return e.s;
+    return nullptr;
+}
+
+double planck(double wl_nm, double kelvin) {
+    const double l = wl_nm * 1e-9;
+    return 1.0 / (std::pow(l, 5.0) * (std::exp(1.4387769e-2 / (l * kelvin)) - 1.0));
+}
+
+void light_weights(const EngineData& data, const FilmProfile& film, double kelvin, bool guide,
+                   const double t_layer[3], double out[3]) {
+    const float* sens = edge_sensitivity_for(film.stock);
+    const size_t n = data.wavelengths.size();
+    const Illuminant* ref = film.ref_illu >= 0 && size_t(film.ref_illu) < data.illuminants.size()
+                                ? &data.illuminants[size_t(film.ref_illu)] : nullptr;
+    if (!sens || n != size_t(kEdgeSensWl) || !ref || ref->values.size() != n) {
+        out[0] = 1.0; out[1] = 0.5; out[2] = 0.0;   // the reference's own fallback
+        return;
+    }
+    double num[3] = {0, 0, 0}, den[3] = {0, 0, 0};
+    for (size_t i = 0; i < n; ++i) {
+        const double wl = data.wavelengths[i];
+        double f = 1.0;
+        if (guide && wl >= 420.0 && wl <= 600.0) f = 1.0 - 0.95 * std::exp(-std::pow((wl - 525.0) / 35.0, 2));
+        const double L = planck(wl, kelvin), Lref = ref->values[i];
+        for (int c = 0; c < 3; ++c) {
+            const double s = sens[3 * i + size_t(c)];
+            if (!std::isfinite(s)) continue;
+            num[c] += L * f * s;
+            den[c] += Lref * s;
+        }
+    }
+    double m = 0.0;
+    for (int c = 0; c < 3; ++c) {
+        out[c] = den[c] > 0 ? t_layer[c] * num[c] / den[c] : 0.0;
+        m = std::max(m, out[c]);
+    }
+    for (int c = 0; c < 3; ++c) out[c] = m > 0 ? out[c] / m : 0.0;
+}
+

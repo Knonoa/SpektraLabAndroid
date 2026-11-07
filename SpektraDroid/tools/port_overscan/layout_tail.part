@@ -1,0 +1,17 @@
+
+    // --- the scan's view of the holes (RFC-032 §30.5, §31): per frame draws
+    // (the colours that depend on the film are `overscan_colours`).
+    {
+        Rng rl(stream(frm ^ (cam << 32), kFrame, 3));
+        for (double& c : L.light_rgb) c = L.holes_light ? 1.0 : 0.0;
+        L.perf_seed = uint32_t(rl.next() & 0xFFFFFFu);
+        L.wall_t = 0.125;
+        const double ang = rl.uni(0.0, 2.0 * M_PI);
+        L.wall_tilt[0] = std::cos(ang);
+        L.wall_tilt[1] = std::sin(ang);
+        L.wall_glow = L.holes_light ? rl.uni(0.02, 0.06) : rl.uni(0.01, 0.03);
+        L.wall_scatter = rl.uni(0.02, 0.035);
+    }
+    L.valid = true;
+    return true;
+}

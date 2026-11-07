@@ -32,6 +32,7 @@
 
 #include "cam16.hpp"
 #include "engine_data.hpp"
+#include "overscan.hpp"
 
 namespace spk {
 
@@ -67,7 +68,19 @@ struct RenderParams {
     bool unsharp_mask = true;             // scanner.unsharp_mask (0.7, 0.7)
 
     uint64_t seed = 0;                    // grain / glare realisation
+
+    // Film Edge (RFC-032) and the Date Back (RFC-031): exposure on the
+    // negative, so both are film-side. With Film Edge on, the frame is cut to
+    // the gate's shape (centred) and the output is the film canvas, larger
+    // than the input -- ask render_output_size() for it.
+    OverscanParams overscan;
+    DateImprintParams date;
 };
+
+// The size render() writes for a w x h input: the input's own, or with Film
+// Edge the film canvas. False (and `error`) for a layout the engine refuses.
+bool render_output_size(int w, int h, const RenderParams& params, int& out_w, int& out_h,
+                        std::string& error);
 
 // Named pipeline taps, mirroring spektrafilm.runtime.topology.Tap.
 // Planes are planar float (r, g, b), w*h each.
@@ -78,10 +91,13 @@ using CancelFn = std::function<bool()>;
 
 class Engine {
 public:
-    Engine(const EngineData& data, const Cam16Setup& cam16);
+    // `fonts` (optional, borrowed): the edge print's faces; without them the
+    // edge print's lettering is left out and every other mark still prints.
+    Engine(const EngineData& data, const Cam16Setup& cam16, const FontLib* fonts = nullptr);
     ~Engine();
 
-    // Renders linear-sRGB float RGB (interleaved, w*h*3) into RGBA8 sRGB.
+    // Renders linear-sRGB float RGB (interleaved, w*h*3) into RGBA8 sRGB,
+    // render_output_size() pixels (w*h unless Film Edge is on).
     // `source_id` identifies the pixels: with the same id, size and
     // film-side params the developed negative is reused, so print-side edits
     // (paper, enlarger filters, print exposure, glare) skip filming.
@@ -107,6 +123,7 @@ void srgb8_to_linear(const uint8_t* rgba, int w, int h, size_t stride_bytes,
 struct EngineContext {
     EngineData data;
     Cam16Setup cam16;
+    FontLib fonts;          // filled by the JNI layer from assets/fonts
     bool ready = false;
     std::string error;
     std::mutex mutex;

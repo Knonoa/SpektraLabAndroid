@@ -1,0 +1,313 @@
+
+// ---------------------------------------------------------------------------
+// Android: rasterising a group, replacing CoreGraphics. Each mark is filled
+// with exact area coverage (the signed-area accumulation of font-rs) in its
+// own box, then composited source-over at its gain, as CG fills gray.
+// ---------------------------------------------------------------------------
+void film_to_canvas_px(const OverscanLayout& L, double s, double t, double& x, double& y) {
+    // Inverse of canvas -> film: (u, v) = A^-1 ((s, t) - (cs, ct)) + (cu, cv).
+    const double a = L.A[0], b = L.A[1], c = L.A[2], d = L.A[3];
+    const double det = a * d - b * c;
+    const double ds = s - L.cs, dt = t - L.ct;
+    const double u = (d * ds - b * dt) / det + L.cu, v = (-c * ds + a * dt) / det + L.cv;
+    x = u / L.px;
+    y = v / L.px;
+}
+
+struct Accum {
+    int w, h, stride;
+    std::vector<float> a;
+    Accum(int w_, int h_) : w(w_), h(h_), stride(w_ + 2), a(size_t(w_ + 2) * size_t(h_), 0.0f) {}
+    void line(double ax, double ay, double bx, double by) {
+        if (ay == by) return;
+        double dir = 1.0;
+        if (ay > by) { std::swap(ax, bx); std::swap(ay, by); dir = -1.0; }
+        const double dxdy = (bx - ax) / (by - ay);
+        const int ys = std::max(0, int(std::floor(ay))), ye = std::min(h, int(std::ceil(by)));
+        double x = ax + (std::max(ay, double(ys)) - ay) * dxdy;
+        for (int y = ys; y < ye; ++y) {
+            float* row = a.data() + size_t(y) * size_t(stride);
+            const double dy = std::min(double(y) + 1.0, by) - std::max(double(y), ay);
+            const double xnext = x + dxdy * dy;
+            const double d = dy * dir;
+            const double x0 = std::clamp(std::min(x, xnext), 0.0, double(w));
+            const double x1 = std::clamp(std::max(x, xnext), 0.0, double(w));
+            const double x0floor = std::floor(x0), x1ceil = std::ceil(x1);
+            const int x0i = int(x0floor), x1i = int(x1ceil);
+            if (x1i <= x0i + 1) {
+                const double xmf = 0.5 * (x0 + x1) - x0floor;
+                row[x0i] += float(d - d * xmf);
+                row[x0i + 1] += float(d * xmf);
+            } else {
+                const double s = 1.0 / (x1 - x0);
+                const double x0f = x0 - x0floor;
+                const double a0 = 0.5 * s * (1.0 - x0f) * (1.0 - x0f);
+                const double x1f = x1 - x1ceil + 1.0;
+                const double am = 0.5 * s * x1f * x1f;
+                row[x0i] += float(d * a0);
+                if (x1i == x0i + 2) {
+                    row[x0i + 1] += float(d * (1.0 - a0 - am));
+                } else {
+                    const double a1 = s * (1.5 - x0f);
+                    row[x0i + 1] += float(d * (a1 - a0));
+                    for (int xi = x0i + 2; xi < x1i - 1; ++xi) row[xi] += float(d * s);
+                    const double a2 = a1 + double(x1i - x0i - 3) * s;
+                    row[x1i - 1] += float(d * (1.0 - a2 - am));
+                }
+                row[x1i] += float(d * am);
+            }
+            x = xnext;
+        }
+    }
+};
+
+// Rasterise one group into a canvas-aligned coverage bitmap (its bounding box).
+bool rasterise(const OverscanLayout& L, const Group& g, std::vector<float>& cov, int& x0, int& y0,
+               int& w, int& h) {
+    double xmin = 1e30, ymin = 1e30, xmax = -1e30, ymax = -1e30;
+    auto grow = [&](double s, double t) {
+        double x, y;
+        film_to_canvas_px(L, s, t, x, y);
+        xmin = std::min(xmin, x); ymin = std::min(ymin, y); xmax = std::max(xmax, x); ymax = std::max(ymax, y);
+    };
+    for (const Op& op : g.ops) {
+        if (op.kind == Op::Poly) {
+            for (size_t k = 0; k + 1 < op.pts.size(); k += 2) grow(op.pts[k], op.pts[k + 1]);
+        } else if (op.kind == Op::Circle) {
+            grow(op.pts[0] - op.size_mm, op.pts[1] - op.size_mm);
+            grow(op.pts[0] + op.size_mm, op.pts[1] + op.size_mm);
+        } else {
+            const double len = (0.75 * op.size_mm * op.hscale + op.tracking_mm * (op.scale_advances ? op.hscale : 1.0)) *
+                               double(op.text.size()) + op.size_mm;
+            const double r = op.rot_deg * M_PI / 180.0;
+            const double ex = std::cos(r), ey = std::sin(r);
+            for (double a : {-0.3 * op.size_mm, len})
+                for (double b : {-1.1 * op.size_mm, 0.4 * op.size_mm})
+                    grow(op.s + a * ex - b * ey, op.t + a * ey + b * ex);
+        }
+    }
+    // Android: an empty group (a stock that prints nothing on one band) has no
+    // box; converting its +-1e30 to int was undefined behaviour (UBSan).
+    if (!(xmax >= xmin) || !(ymax >= ymin)) return false;
+    const double pad = 3.0 + 3.0 * g.blur_mm / L.px;
+    const double cw = double(L.canvas_w), chh = double(L.canvas_h);
+    x0 = int(std::clamp(std::floor(xmin - pad), 0.0, cw));
+    y0 = int(std::clamp(std::floor(ymin - pad), 0.0, chh));
+    const int x1 = int(std::clamp(std::ceil(xmax + pad), 0.0, cw));
+    const int y1 = int(std::clamp(std::ceil(ymax + pad), 0.0, chh));
+    w = x1 - x0; h = y1 - y0;
+    if (w <= 0 || h <= 0) return false;
+    cov.assign(size_t(w) * size_t(h), 0.0f);
+
+    std::vector<std::vector<double>> polys;   // canvas px, relative to the group's box
+    for (const Op& op : g.ops) {
+        polys.clear();
+        auto to_px = [&](const std::vector<double>& film_pts) {
+            std::vector<double> p;
+            p.reserve(film_pts.size());
+            for (size_t k = 0; k + 1 < film_pts.size(); k += 2) {
+                double x, y;
+                film_to_canvas_px(L, film_pts[k], film_pts[k + 1], x, y);
+                p.push_back(x - x0); p.push_back(y - y0);
+            }
+            polys.push_back(std::move(p));
+        };
+        if (op.kind == Op::Poly) {
+            to_px(op.pts);
+        } else if (op.kind == Op::Circle) {
+            const double r = op.size_mm, rpx = r / L.px;
+            const int n = std::clamp(int(std::ceil(2.0 * M_PI * rpx / 1.2)), 8, 64);
+            std::vector<double> c;
+            for (int k = 0; k < n; ++k) {
+                const double a = 2.0 * M_PI * k / n;
+                c.push_back(op.pts[0] + r * std::cos(a)); c.push_back(op.pts[1] + r * std::sin(a));
+            }
+            to_px(c);
+        } else {
+            std::vector<std::vector<double>> outl;
+            text_outlines(op, 0.35 * L.px, outl);
+            for (const auto& o : outl) to_px(o);
+        }
+        // the mark's own box inside the group's
+        double bx0 = 1e30, by0 = 1e30, bx1 = -1e30, by1 = -1e30;
+        for (const auto& p : polys)
+            for (size_t k = 0; k + 1 < p.size(); k += 2) {
+                bx0 = std::min(bx0, p[k]); bx1 = std::max(bx1, p[k]);
+                by0 = std::min(by0, p[k + 1]); by1 = std::max(by1, p[k + 1]);
+            }
+        if (!(bx1 > bx0) || !(by1 > by0)) continue;
+        const int ox = std::max(0, int(std::floor(bx0)) - 1), oy = std::max(0, int(std::floor(by0)) - 1);
+        const int ow = std::min(w, int(std::ceil(bx1)) + 2) - ox, oh = std::min(h, int(std::ceil(by1)) + 2) - oy;
+        if (ow <= 0 || oh <= 0) continue;
+        Accum acc(ow, oh);
+        for (const auto& p : polys) {
+            const size_t n = p.size() / 2;
+            for (size_t k = 0; k < n; ++k) {
+                const size_t j = (k + 1) % n;
+                acc.line(p[2 * k] - ox, p[2 * k + 1] - oy, p[2 * j] - ox, p[2 * j + 1] - oy);
+            }
+        }
+        const float gain = float(std::clamp(op.gain, 0.0, 1.0));
+        for (int y = 0; y < oh; ++y) {
+            const float* row = acc.a.data() + size_t(y) * size_t(acc.stride);
+            float* dst = cov.data() + size_t(oy + y) * size_t(w) + size_t(ox);
+            float sum = 0.0f;
+            for (int x = 0; x < ow; ++x) {
+                sum += row[x];
+                const float c = std::min(1.0f, std::fabs(sum));
+                if (c > 0.0f) dst[x] = dst[x] * (1.0f - c) + gain * c;
+            }
+        }
+    }
+    // The projection's softness (RFC-031 §3.4): a small Gaussian on the mask.
+    const double sigma = g.blur_mm / L.px;
+    if (sigma > 0.3) {
+        std::vector<float> tmp(cov.size());
+        gaussian_blur_plane(cov.data(), tmp.data(), w, h, sigma);
+        cov.swap(tmp);
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Android: overscan.metal's helpers, on the CPU. Same arithmetic, in double.
+// ---------------------------------------------------------------------------
+inline void canvas_to_film(const OverscanLayout& L, double x, double y, double& s, double& t) {
+    const double u = (x + 0.5) * L.px - L.cu, v = (y + 0.5) * L.px - L.cv;
+    s = L.A[0] * u + L.A[1] * v + L.cs;
+    t = L.A[2] * u + L.A[3] * v + L.ct;
+}
+inline uint32_t hash_u(uint32_t x) {
+    x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
+    return x;
+}
+inline double hash_f(int i, uint32_t seed) { return double(hash_u(uint32_t(i) * 0x9E3779B9u ^ seed)) * (1.0 / 4294967295.0); }
+inline double value_noise(double x, uint32_t seed) {
+    const double i0 = std::floor(x), f = x - i0;
+    const double w = f * f * (3.0 - 2.0 * f);
+    const double a = hash_f(int(i0), seed), b = hash_f(int(i0) + 1, seed);
+    return a + (b - a) * w;
+}
+inline double clamp01(double v) { return std::min(1.0, std::max(0.0, v)); }
+
+// Signed distance to a convex quad (either winding; a repeated vertex makes a
+// triangle), negative inside.
+double sd_quad(double ps, double pt, const double* q) {
+    const double vx[4] = {q[0], q[2], q[4], q[6]}, vy[4] = {q[1], q[3], q[5], q[7]};
+    double d = (ps - vx[0]) * (ps - vx[0]) + (pt - vy[0]) * (pt - vy[0]);
+    double sgn = 1.0;
+    for (int i = 0, j = 3; i < 4; j = i, ++i) {
+        const double ex = vx[j] - vx[i], ey = vy[j] - vy[i], wx = ps - vx[i], wy = pt - vy[i];
+        const double ee = ex * ex + ey * ey;
+        if (ee < 1e-12) continue;
+        const double k = std::clamp((wx * ex + wy * ey) / ee, 0.0, 1.0);
+        const double bx = wx - ex * k, by = wy - ey * k;
+        d = std::min(d, bx * bx + by * by);
+        const bool c0 = pt >= vy[i], c1 = pt < vy[j], c2 = ex * wy > ey * wx;
+        if ((c0 && c1 && c2) || (!c0 && !c1 && !c2)) sgn = -sgn;
+    }
+    return sgn * std::sqrt(d);
+}
+
+// The gate (RFC-032 §29): signed distance, negative inside, in mm.
+double gate_sdf(const OverscanLayout& L, double ss, double st) {
+    const double hw = 0.5 * L.gate_along, hh = 0.5 * L.gate_across;
+    const double ds = ss - (L.gate_s0 + hw), dt = st - (L.gate_t0 + hh);
+    const double r = ds > 0.0 ? (dt > 0.0 ? L.gate_r[2] : L.gate_r[1]) : (dt > 0.0 ? L.gate_r[3] : L.gate_r[0]);
+    const double qs = std::fabs(ds) - (hw - r), qt = std::fabs(dt) - (hh - r);
+    double d = std::hypot(std::max(qs, 0.0), std::max(qt, 0.0)) + std::min(std::max(qs, qt), 0.0) - r;
+    int side;
+    double along, len;
+    if (qs > qt) { side = ds > 0.0 ? 1 : 3; along = dt + hh; len = 2.0 * hh; }
+    else         { side = dt > 0.0 ? 2 : 0; along = ds + hw; len = 2.0 * hw; }
+    const double u = clamp01(along / len);
+    double w = 0.0;
+    for (int k = 0; k < 3; ++k) w += L.wob_a[side][k] * std::sin(double(k + 1) * M_PI * u + L.wob_ph[side][k]);
+    d -= w * std::sin(M_PI * u);
+    for (const OverscanLayout::Quad& q : L.quads) {
+        double dq;
+        if (std::fabs(q.sign) > 1.5) {
+            const double rx = std::max(q.pts[2], 1e-4), ry = std::max(q.pts[3], 1e-4);
+            dq = (std::hypot((ss - q.pts[0]) / rx, (st - q.pts[1]) / ry) - 1.0) * std::min(rx, ry);
+        } else {
+            dq = sd_quad(ss, st, q.pts) - q.round;
+        }
+        d = q.sign > 0.0 ? std::min(d, dq) : std::max(d, -dq);
+    }
+    if (L.rough_amp > 0.0) {
+        const double per = std::max(L.rough_period, 1e-3);
+        d += L.rough_amp * (value_noise(ss / per, L.rough_seed) + value_noise(st / per, L.rough_seed ^ 0x5bd1e995u) - 1.0);
+    }
+    return d;
+}
+
+// The gate's shadow from a circular aperture: the lit fraction of a disc of
+// radius r cut by a straight edge at signed distance d.
+double penumbra(double d, double r) {
+    if (r <= 1e-6) return d < 0.0 ? 1.0 : 0.0;
+    const double u = std::clamp(-d / r, -1.0, 1.0);
+    return 0.5 + (u * std::sqrt(std::max(1.0 - u * u, 0.0)) + std::asin(u)) * (1.0 / M_PI);
+}
+
+inline void sample_frame(const float* const f[3], double fx, double fy, uint32_t fw, uint32_t fh, double out[3]) {
+    fx = std::clamp(fx, 0.0, double(fw) - 1.0);
+    fy = std::clamp(fy, 0.0, double(fh) - 1.0);
+    const uint32_t x0 = uint32_t(fx), y0 = uint32_t(fy);
+    const uint32_t x1 = std::min(x0 + 1u, fw - 1u), y1 = std::min(y0 + 1u, fh - 1u);
+    const double ax = fx - x0, ay = fy - y0;
+    const size_t i00 = size_t(y0) * fw + x0, i01 = size_t(y0) * fw + x1, i10 = size_t(y1) * fw + x0, i11 = size_t(y1) * fw + x1;
+    for (int c = 0; c < 3; ++c) {
+        const double top = f[c][i00] + (f[c][i01] - f[c][i00]) * ax;
+        const double bot = f[c][i10] + (f[c][i11] - f[c][i10]) * ax;
+        out[c] = top + (bot - top) * ay;
+    }
+}
+
+// The nearest perforation's signed distance (mm, negative inside), with each
+// hole's punch tolerances; `hole` is its hash.
+double perf_sdf(const OverscanLayout& L, double ss, double st, uint32_t& hole) {
+    const double W = L.film_w, pitch = L.perf_pitch, ph = L.perf_phase;
+    const double k = std::floor((ss - ph - 0.5 * L.perf_w) / pitch + 0.5);
+    const bool top = st < 0.5 * W;
+    const uint32_t seed = L.perf_seed;
+    hole = hash_u(uint32_t(int(k) * 2 + (top ? 0 : 1)) * 0x9E3779B9u ^ seed);
+    const int hi = int(hole & 0xFFFFu);
+    const double j0 = hash_f(hi, seed ^ 0x1u) - 0.5, j1 = hash_f(hi, seed ^ 0x2u) - 0.5;
+    const double j2 = hash_f(hi, seed ^ 0x3u) - 0.5, j3 = hash_f(hi, seed ^ 0x4u) - 0.5;
+    const double j4 = hash_f(hi, seed ^ 0x5u) - 0.5;
+    const double wa = L.perf_w + 0.016 * j2, hc = L.perf_h + 0.016 * j3;
+    const double r = std::clamp(L.perf_r + 0.08 * j4, 0.3, 0.6);
+    const double sc = ph + k * pitch + 0.5 * L.perf_w + 0.020 * j0;
+    const double tc = (top ? L.perf_edge + 0.5 * L.perf_h : W - L.perf_edge - 0.5 * L.perf_h) + 0.024 * j1;
+    const double qx = std::fabs(ss - sc) - (0.5 * wa - r), qy = std::fabs(st - tc) - (0.5 * hc - r);
+    double d = std::hypot(std::max(qx, 0.0), std::max(qy, 0.0)) + std::min(std::max(qx, qy), 0.0) - r;
+    const double rough = 0.001 + 0.003 * hash_f(hi, seed ^ 0x6u);
+    d += rough * (value_noise(ss / 0.05, seed ^ 0x77u) + value_noise(st / 0.05, seed ^ 0x99u) - 1.0) * 2.0;
+    if (hash_f(hi, seed ^ 0x7u) < 0.25) {
+        const double ang = 6.2831853 * hash_f(hi, seed ^ 0x8u);
+        const double pbs = sc + std::cos(ang) * 0.5 * wa, pbt = tc + std::sin(ang) * 0.5 * hc;
+        const double sig = 0.020 + 0.030 * hash_f(hi, seed ^ 0x9u);
+        const double amp = (hash_f(hi, seed ^ 0xAu) < 0.5 ? -1.0 : 1.0) * (0.006 + 0.010 * hash_f(hi, seed ^ 0xBu));
+        d += amp * std::exp(-((ss - pbs) * (ss - pbs) + (st - pbt) * (st - pbt)) / (sig * sig));
+    }
+    return d;
+}
+
+// How soft a perforation's edge is in a scan (sigma, film mm), measured on
+// the owner's strips.
+constexpr double kHoleEdgeSigma = 0.017;
+
+double erf_as(double x) { return std::erf(x); }
+
+// Where there is film: 1 on the strip, 0 in the perforations and past its edges.
+double film_alpha(const OverscanLayout& L, double ss, double st) {
+    const double W = L.film_w, px = L.px;
+    double a = L.carrier_none ? 1.0 : clamp01(std::min(st, W - st) / px + 0.5);
+    if (L.perforated) {
+        uint32_t hole;
+        const double sigma = std::sqrt(kHoleEdgeSigma * kHoleEdgeSigma + 0.0961 * px * px);
+        a *= 0.5 + 0.5 * erf_as(perf_sdf(L, ss, st, hole) / (1.41421356 * sigma));
+    }
+    return a;
+}
+

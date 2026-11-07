@@ -26,9 +26,9 @@ SRC="${SPEKTRAFILM_SRC:-$ROOT/upstream/spektrafilm/src}"
 [ -d "$SRC/spektrafilm" ] || { echo "spektrafilm not found at $SRC (set SPEKTRAFILM_SRC)"; exit 2; }
 mkdir -p "$OUT/ref" "$OUT/eng"
 
-if [ ! -x "$OUT/host_parity" ] || [ "$CPP/spektra_engine.cpp" -nt "$OUT/host_parity" ]; then
+if [ ! -x "$OUT/host_parity" ] || [ "$CPP/spektra_engine.cpp" -nt "$OUT/host_parity" ] || [ "$CPP/overscan.cpp" -nt "$OUT/host_parity" ]; then
   ${CXX:-g++} -std=c++20 -O2 -pthread -I "$CPP" "$TOOLS/parity/host_parity.cpp" \
-    "$CPP/spektra_engine.cpp" "$CPP/filters.cpp" "$CPP/cam16.cpp" -o "$OUT/host_parity"
+    "$CPP/spektra_engine.cpp" "$CPP/filters.cpp" "$CPP/cam16.cpp" "$CPP/overscan.cpp" -o "$OUT/host_parity"
 fi
 
 PYTHONPATH="$SRC" "$PY" "$TOOLS/parity/oracle.py" "$IN" "$OUT/ref" "$@"

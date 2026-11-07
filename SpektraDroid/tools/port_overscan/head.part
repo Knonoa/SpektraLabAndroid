@@ -1,0 +1,28 @@
+// overscan.cpp -- Film Edge (RFC-032 §26-§27) and the Date Back (RFC-031) as
+// exposure on the negative. See overscan.hpp.
+//
+// Ported from SpektraLab's engine/src/pipeline/overscan.cpp (the layout, the
+// stocks' edge prints, the gate, the date back) and engine/src/shaders/
+// overscan.metal (the four kernels). The tables, faces and layouts below are
+// the desktop engine's, copied unchanged; what is new here is marked
+// "Android:".
+#include "overscan.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+
+#include "filters.hpp"
+#include "parallel.hpp"
+
+#define STB_TRUETYPE_IMPLEMENTATION
+#define STBTT_STATIC
+#include "third_party/stb_truetype.h"
+
+namespace spk {
+
+namespace {
+
+#include "edge_sensitivity.inc"
+

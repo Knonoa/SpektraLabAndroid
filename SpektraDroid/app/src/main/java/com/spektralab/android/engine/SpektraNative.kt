@@ -3,6 +3,8 @@ package com.spektralab.android.engine
 import android.content.res.AssetManager
 import android.graphics.Bitmap
 import org.json.JSONObject
+import java.io.Closeable
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Mirror of the C++ spk::RenderParams. Field names are read by name through
@@ -32,6 +34,31 @@ class NativeParams(
     @JvmField val glareAmount: Float,
     @JvmField val unsharpMask: Boolean,
     @JvmField val seed: Long,
+    // Film Edge (RFC-032): the film outside the frame
+    @JvmField val overscanActive: Boolean = false,
+    @JvmField val overscanFormat: String = "135",
+    @JvmField val overscanMode: String = "strip",
+    @JvmField val overscanGate: String = "auto",
+    @JvmField val overscanHoles: String = "white",
+    @JvmField val overscanCameraSeed: Int = 1,
+    @JvmField val overscanFrameSeed: Int = 1,
+    @JvmField val overscanFrameNumber: Int = 0,
+    @JvmField val overscanFog: Float = 1f,
+    @JvmField val overscanLeaks: Float = 0f,
+    @JvmField val overscanEdgeText: String = "",
+    @JvmField val overscanFNumber: Float = 0f,
+    // Date Back (RFC-031): the date and the shooting data, exposed from behind
+    @JvmField val dateActive: Boolean = false,
+    @JvmField val dateStyle: String = "lcd",
+    @JvmField val dateText: String = "",
+    @JvmField val dateDataText: String = "",
+    @JvmField val datePlacement: String = "frame",
+    @JvmField val dateCorner: String = "br",
+    @JvmField val dateInsetX: Float = 3f,
+    @JvmField val dateInsetY: Float = 2.4f,
+    @JvmField val dateSize: Float = 1f,
+    @JvmField val dateEv: Float = 3.5f,
+    @JvmField val dateDataInFrame: Boolean = true,
 )
 
 data class FilmStock(
@@ -108,7 +135,33 @@ object SpektraNative {
     fun dropCaches(handle: Long) = nativeDropCaches(handle)
 
     /**
-     * Renders [source] (ARGB_8888 sRGB) into [out] (same size). [sourceId] keys the
+     * The size [render] writes for a [w] x [h] source: the same, or with Film
+     * Edge the film canvas (the frame cut to the gate, plus the film around
+     * it). Null when the engine refuses the layout.
+     */
+    fun outputSize(params: NativeParams, w: Int, h: Int): IntArray? = nativeOutputSize(params, w, h)
+
+    /** Full-precision native pixels. Bitmap is only a display copy. */
+    class LinearImage internal constructor(id: Long) : Closeable {
+        private val nativeId = AtomicLong(id)
+        internal val id: Long get() = nativeId.get().also { check(it != 0L) { "Image closed" } }
+        private val size = nativeLinearSize(id)
+        val width: Int get() = size[0]
+        val height: Int get() = size[1]
+        fun bitmap(): Bitmap = nativeLinearBitmap(id)
+        fun scaled(maxEdge: Int): LinearImage = LinearImage(nativeScaleLinear(id, maxEdge))
+        /** For decoder diagnostics and precision regression tests. */
+        fun pixel(x: Int, y: Int): FloatArray = nativeLinearPixel(id, x, y)
+        override fun close() { nativeId.getAndSet(0L).takeIf { it != 0L }?.let(::nativeCloseLinear) }
+    }
+
+    fun imageInfo(path: String): IntArray = nativeImageInfo(path)
+    fun loadLinear(path: String, maxEdge: Int): LinearImage = LinearImage(nativeLoadLinear(path, maxEdge))
+    fun renderLinear(handle: Long, source: LinearImage, out: Bitmap, params: NativeParams, token: Long): String? =
+        nativeRenderLinear(handle, source.id, out, params, token)
+
+    /**
+     * Renders [source] (ARGB_8888 sRGB) into [out] ([outputSize]). [sourceId] keys the
      * engine's linear copy and developed negative. Returns null on success,
      * "cancelled", or an error message.
      */
@@ -123,6 +176,15 @@ object SpektraNative {
     private external fun nativeDestroy(handle: Long)
     private external fun nativeSetWanted(handle: Long, token: Long)
     private external fun nativeDropCaches(handle: Long)
+    private external fun nativeOutputSize(params: NativeParams, w: Int, h: Int): IntArray?
+    private external fun nativeImageInfo(path: String): IntArray
+    private external fun nativeLoadLinear(path: String, maxEdge: Int): Long
+    private external fun nativeScaleLinear(id: Long, maxEdge: Int): Long
+    private external fun nativeLinearSize(id: Long): IntArray
+    private external fun nativeLinearBitmap(id: Long): Bitmap
+    private external fun nativeLinearPixel(id: Long, x: Int, y: Int): FloatArray
+    private external fun nativeCloseLinear(id: Long)
+    private external fun nativeRenderLinear(handle: Long, imageId: Long, out: Bitmap, params: NativeParams, token: Long): String?
     private external fun nativeRender(
         handle: Long, source: Bitmap, sourceId: Long, out: Bitmap,
         params: NativeParams, token: Long,

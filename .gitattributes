@@ -1,0 +1,5 @@
+# Preserve upstream licence text verbatim, including its existing whitespace.
+SpektraDroid/app/src/main/assets/fonts/*LICENSE.txt whitespace=-trailing-space,-blank-at-eof
+SpektraDroid/app/src/main/assets/licenses/** whitespace=-trailing-space,-blank-at-eof
+# Assembly fragments deliberately carry blank separators at their boundaries.
+SpektraDroid/tools/port_overscan/*.part whitespace=-blank-at-eof

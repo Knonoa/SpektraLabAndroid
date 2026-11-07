@@ -14,8 +14,11 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
+import androidx.annotation.RequiresApi
+import com.spektralab.android.engine.SpektraNative
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -26,6 +29,12 @@ object PhotoIO {
 
     /** Oriented pixel size and display name, without decoding pixels. */
     fun info(context: Context, uri: Uri): Info? {
+        val name = displayName(context, uri)
+        if (isNativeFormat(context, uri, name)) {
+            val file = materialize(context, uri, name)
+            val size = SpektraNative.imageInfo(file.absolutePath)
+            return Info(size[0], size[1], name)
+        }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         var w = bounds.outWidth
@@ -44,7 +53,7 @@ object PhotoIO {
             if (w <= 0 || h <= 0) return null
         }
         if (orientationSwapsAxes(context, uri)) { val t = w; w = h; h = t }
-        return Info(w, h, displayName(context, uri))
+        return Info(w, h, name)
     }
 
     /**
@@ -52,11 +61,16 @@ object PhotoIO {
      * is at most [maxEdge], as a software ARGB_8888 sRGB bitmap.
      */
     fun decode(context: Context, uri: Uri, maxEdge: Int): Bitmap? {
+        val name = displayName(context, uri)
+        if (isNativeFormat(context, uri, name)) {
+            return SpektraNative.loadLinear(materialize(context, uri, name).absolutePath, maxEdge).use { it.bitmap() }
+        }
         val bmp = if (Build.VERSION.SDK_INT >= 28) decodeP(context, uri, maxEdge)
         else decodeLegacy(context, uri, maxEdge)
         return bmp?.let { ensureArgb(it) }
     }
 
+    @RequiresApi(28)
     private fun decodeP(context: Context, uri: Uri, maxEdge: Int): Bitmap? = runCatching {
         val src = ImageDecoder.createSource(context.contentResolver, uri)
         ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
@@ -144,10 +158,69 @@ object PhotoIO {
     }
 
     private fun displayName(context: Context, uri: Uri): String = runCatching {
+        if (uri.scheme == "file") return@runCatching uri.path?.let(::File)?.name
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null
         }
     }.getOrNull() ?: "photo"
+
+    private fun isNativeFormat(context: Context, uri: Uri, name: String): Boolean {
+        val lower = name.lowercase(Locale.ROOT)
+        if (RAW_EXTENSIONS.any { lower.endsWith(it) } || TIFF_EXTENSIONS.any { lower.endsWith(it) }) return true
+        val mime = context.contentResolver.getType(uri)?.lowercase(Locale.ROOT) ?: return false
+        return mime.contains("tiff") || mime.contains("dng") || mime == "image/x-adobe-raw" ||
+            mime == "application/x-raw" || listOf("sony", "nikon", "canon").any { mime.startsWith("image/x-$it") }
+    }
+
+    /** Non-null for high-precision formats. Their engine input must stay native. */
+    fun nativePath(context: Context, uri: Uri): String? {
+        val name = displayName(context, uri)
+        return if (isNativeFormat(context, uri, name)) materialize(context, uri, name).absolutePath else null
+    }
+
+    // RAW MIME types vary across document providers; some export all RAW as
+    // octet-stream. OpenDocument must allow those files too.
+    val IMPORT_MIME_TYPES = arrayOf("image/*", "application/octet-stream")
+
+    /** LibRaw and the TIFF reader need a seekable path; SAF can expose pipes. */
+    private fun materialize(context: Context, uri: Uri, displayName: String): File {
+        if (uri.scheme == "file") return File(requireNotNull(uri.path))
+        val mime = context.contentResolver.getType(uri).orEmpty().lowercase(Locale.ROOT)
+        val suffix = displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        val extension = when {
+            ".$suffix" in RAW_EXTENSIONS || ".$suffix" in TIFF_EXTENSIONS -> suffix
+            mime.contains("tiff") -> "tif"
+            else -> "dng" // LibRaw sniffs RAW containers regardless of camera brand.
+        }
+        val metadata = runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getLong(0).toString() else ""
+            }
+        }.getOrNull().orEmpty()
+        val key = java.security.MessageDigest.getInstance("SHA-256")
+            .digest("$uri|$displayName|$metadata".toByteArray()).joinToString("") { "%02x".format(it) }
+        val dir = File(context.cacheDir, "native-imports").apply { mkdirs() }
+        val out = File(dir, "$key.$extension")
+        synchronized(this) {
+            if (out.isFile && out.length() > 0) { out.setLastModified(System.currentTimeMillis()); return out }
+            // Bound retained imports to the newest file; the editor owns one source.
+            dir.listFiles()?.filter { it != out }?.forEach { it.delete() }
+            val tmp = File.createTempFile(key.take(12), ".partial", dir)
+            try {
+                val input = context.contentResolver.openInputStream(uri) ?: error("无法读取文件")
+                input.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
+                check(tmp.length() > 0 && tmp.renameTo(out)) { "无法缓存文件，请检查剩余空间" }
+                return out
+            } finally { tmp.delete() }
+        }
+    }
+
+    private val TIFF_EXTENSIONS = setOf(".tif", ".tiff")
+    private val RAW_EXTENSIONS = setOf(
+        ".dng", ".arw", ".srf", ".sr2", ".nef", ".nrw", ".cr2", ".cr3", ".crw",
+        ".raf", ".orf", ".rw2", ".pef", ".srw", ".3fr", ".iiq", ".erf", ".mos",
+        ".mrw", ".x3f", ".raw", ".rwl", ".kdc", ".dcr", ".mef", ".fff", ".gpr",
+    )
 
     /**
      * Saves [bitmap] as a JPEG into Pictures/SpektraLab and returns its uri.

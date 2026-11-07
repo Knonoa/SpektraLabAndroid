@@ -79,7 +79,9 @@ fun PhotoViewer(
     var holding by remember { mutableStateOf(false) }
     var hintVisible by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
-    val aspect = before.width.toFloat() / before.height
+    // With Film Edge the result is the film canvas, not the photo's shape:
+    // lay out by what is shown, and fit each image into it at its own aspect.
+    val aspect = (after ?: before).let { it.width.toFloat() / it.height }
     val hasResult = afterImg != null
     LaunchedEffect(before, hasResult) {
         if (hasResult) { delay(5000); hintVisible = false }
@@ -249,7 +251,11 @@ private fun clampOffset(o: Offset, scale: Float, view: Size, aspect: Float): Off
     return Offset(o.x.coerceIn(-mx, mx), o.y.coerceIn(-my, my))
 }
 
-private fun DrawScope.drawPhoto(img: ImageBitmap, dst: Dst) {
+private fun DrawScope.drawPhoto(img: ImageBitmap, box: Dst) {
+    // contain: an image of another aspect (the original beside a film canvas) is centred in the box
+    val a = img.width.toFloat() / img.height
+    val (w, h) = if (a > box.width / box.height) box.width to box.width / a else box.height * a to box.height
+    val dst = Dst(box.left + (box.width - w) / 2f, box.top + (box.height - h) / 2f, w, h)
     drawImage(
         img,
         srcOffset = IntOffset.Zero,

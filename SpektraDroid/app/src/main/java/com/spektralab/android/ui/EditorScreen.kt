@@ -7,7 +7,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,6 +35,7 @@ import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material3.AlertDialog
@@ -74,6 +74,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.spektralab.android.PhotoIO
 import com.spektralab.android.EditState
 import com.spektralab.android.EditorViewModel
 import com.spektralab.android.ExportSize
@@ -82,7 +83,7 @@ import com.spektralab.android.UiMessage
 import com.spektralab.android.engine.Catalog
 
 @Composable
-fun EditorScreen(vm: EditorViewModel) {
+fun EditorScreen(vm: EditorViewModel, onCamera: () -> Unit = {}) {
     val context = LocalContext.current
     val state by vm.state.collectAsState()
     val catalog by vm.catalog.collectAsState()
@@ -97,10 +98,10 @@ fun EditorScreen(vm: EditorViewModel) {
     var showExport by rememberSaveable { mutableStateOf(false) }
     var showAbout by rememberSaveable { mutableStateOf(false) }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.loadPhoto(uri)
     }
-    val pick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+    val pick = { picker.launch(PhotoIO.IMPORT_MIME_TYPES) }
 
     var pendingExport by remember { mutableStateOf<ExportSize?>(null) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -141,6 +142,7 @@ fun EditorScreen(vm: EditorViewModel) {
             override fun selectPaper(stock: String) = vm.selectPaper(stock)
             override fun selectScanFilm() = vm.selectScanFilm()
             override fun resetAdjustments() = vm.resetAdjustments()
+            override fun newFilmEdgeBody() = vm.newFilmEdgeBody()
         }
     }
 
@@ -156,6 +158,7 @@ fun EditorScreen(vm: EditorViewModel) {
         snackbar = snackbar,
         actions = actions,
         onPick = pick,
+        onCamera = onCamera,
         onExport = { showExport = true },
         onCancelExport = vm::cancelExport,
         onAbout = { showAbout = true },
@@ -187,6 +190,7 @@ fun EditorContent(
     snackbar: SnackbarHostState,
     actions: EditorActions,
     onPick: () -> Unit,
+    onCamera: () -> Unit,
     onExport: () -> Unit,
     onCancelExport: () -> Unit,
     onAbout: () -> Unit,
@@ -198,7 +202,7 @@ fun EditorContent(
                 Box(m) {
                     when {
                         engineError != null -> CenterMessage("引擎初始化失败", engineError)
-                        photo == null -> EmptyState(loading = loading, onPick = onPick)
+                        photo == null -> EmptyState(loading = loading, onPick = onPick, onCamera = onCamera)
                         else -> PhotoViewer(
                             before = photo.preview,
                             after = result,
@@ -209,7 +213,7 @@ fun EditorContent(
                 }
             }
             val topBar: @Composable () -> Unit = {
-                TopBar(state, catalog, photo != null, exporting, onPick, onExport, actions::resetAdjustments, onAbout)
+                TopBar(state, catalog, photo != null, exporting, onPick, onCamera, onExport, actions::resetAdjustments, onAbout)
             }
             if (landscape) {
                 Row(Modifier.fillMaxSize()) {
@@ -225,6 +229,7 @@ fun EditorContent(
                         state, catalog, actions,
                         Modifier.width(380.dp).fillMaxHeight()
                             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End + WindowInsetsSides.Top + WindowInsetsSides.Bottom)),
+                        shooting = photo?.shooting,
                     )
                 }
             } else {
@@ -240,6 +245,7 @@ fun EditorContent(
                         Modifier.fillMaxWidth()
                             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                             .height(panelHeight),
+                        shooting = photo?.shooting,
                     )
                 }
             }
@@ -263,6 +269,7 @@ private fun TopBar(
     hasPhoto: Boolean,
     exporting: Boolean,
     onPick: () -> Unit,
+    onCamera: () -> Unit,
     onExport: () -> Unit,
     onReset: () -> Unit,
     onAbout: () -> Unit,
@@ -280,6 +287,9 @@ private fun TopBar(
                 "$film  ›  $print",
                 color = Palette.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
+        }
+        IconButton(onClick = onCamera) {
+            Icon(Icons.Outlined.PhotoCamera, contentDescription = "拍摄", tint = Palette.Text)
         }
         IconButton(onClick = onPick) {
             Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = "选择照片", tint = Palette.Text)
@@ -311,7 +321,7 @@ private fun TopBar(
 }
 
 @Composable
-private fun EmptyState(loading: Boolean, onPick: () -> Unit) {
+private fun EmptyState(loading: Boolean, onPick: () -> Unit, onCamera: () -> Unit) {
     Box(Modifier.fillMaxSize().background(Palette.Canvas), contentAlignment = Alignment.Center) {
         if (loading) {
             CircularProgressIndicator(color = Palette.Amber, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
@@ -337,6 +347,12 @@ private fun EmptyState(loading: Boolean, onPick: () -> Unit) {
                     onClick = onPick,
                     colors = ButtonDefaults.buttonColors(containerColor = Palette.Amber, contentColor = Palette.AmberInk),
                 ) { Text("打开相册") }
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.material3.OutlinedButton(onClick = onCamera) {
+                    Icon(Icons.Outlined.PhotoCamera, null, tint = Palette.Amber, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("拍摄", color = Palette.Text)
+                }
             }
         }
     }

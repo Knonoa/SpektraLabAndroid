@@ -9,6 +9,11 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import com.spektralab.android.ui.CameraScreen
 import com.spektralab.android.ui.EditorScreen
 import com.spektralab.android.ui.SpektraTheme
 
@@ -24,7 +29,19 @@ class MainActivity : ComponentActivity() {
         // "Open with" / "Share to" from the gallery
         if (savedInstanceState == null) incomingImage()?.let { vm.loadPhoto(it) }
         setContent {
-            SpektraTheme { EditorScreen(vm) }
+            SpektraTheme {
+                var camera by rememberSaveable { mutableStateOf(false) }
+                if (camera) {
+                    CameraScreen(
+                        onCaptured = { uri -> vm.loadPhoto(uri); camera = false },
+                        onBack = { camera = false },
+                        liveParams = vm::liveParams,
+                        filmName = vm.filmName(),
+                    )
+                } else {
+                    EditorScreen(vm, onCamera = { camera = true })
+                }
+            }
         }
     }
 

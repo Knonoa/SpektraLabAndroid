@@ -46,7 +46,19 @@ data class EditState(
     val glareActive: Boolean = true,
     val glareAmount: Float = 1f,
     val sharpen: Boolean = true,
+    // the film outside the frame, and the date back (both exposure on the negative)
+    val filmEdge: FilmEdgeSettings = FilmEdgeSettings(),
+    val dateBack: DateBackSettings = DateBackSettings(),
 ) {
+    /** The camera whose back prints the date: the film edge's format while it is on, else Film Format's. */
+    val dateCamera: FilmEdgeFormat get() = if (filmEdge.active) filmEdge.format else FilmEdgeFormat.of(format)
+
+    /** What a frame contributes to the negative beyond the edit: its EXIF, its seed, its stock's edge print. */
+    data class Frame(
+        val shooting: ShootingData = ShootingData(),
+        val frameSeed: Int = 1,
+        val edgeText: String = "",
+    )
     /** True when the change from [old] leaves the developed negative intact. */
     fun printSideOnlyChangeFrom(old: EditState): Boolean =
         copy(
@@ -55,7 +67,18 @@ data class EditState(
             glareActive = old.glareActive, glareAmount = old.glareAmount, sharpen = old.sharpen,
         ) == old
 
-    fun toNative(seed: Long) = NativeParams(
+    fun toNative(seed: Long, frame: Frame = Frame()): NativeParams {
+        val edge = filmEdge
+        val db = dateBack
+        val camera = dateCamera
+        val dateText = when {
+            !db.active || !camera.hasDateBack -> ""
+            db.face == DateBackFace.DATA -> frame.shooting.dataText
+            else -> frame.shooting.dateText(db.order)
+        }
+        val dataText = if (db.active && db.withData && db.face != DateBackFace.DATA && camera.hasDateBack)
+            frame.shooting.dataText else ""
+        return NativeParams(
         filmStock = filmStock,
         printStock = printStock,
         scanFilm = scanFilm,
@@ -80,7 +103,32 @@ data class EditState(
         glareAmount = glareAmount,
         unsharpMask = sharpen,
         seed = seed,
-    )
+        overscanActive = edge.active,
+        // the date alone still reads the film's direction (half frame or not) from the format
+        overscanFormat = camera.wire,
+        overscanMode = edge.view.wire,
+        overscanGate = edge.gate.wire,
+        overscanHoles = edge.holes.wire,
+        overscanCameraSeed = edge.cameraSeed.coerceAtLeast(1),
+        overscanFrameSeed = frame.frameSeed.coerceAtLeast(1),
+        overscanFrameNumber = edge.frameNumber.coerceIn(0, 99),
+        overscanFog = edge.fog,
+        overscanLeaks = edge.leaks,
+        overscanEdgeText = frame.edgeText,
+        overscanFNumber = (frame.shooting.fNumber ?: 0.0).toFloat(),
+        dateActive = db.active && (dateText.isNotEmpty() || dataText.isNotEmpty()),
+        dateStyle = db.face.wire,
+        dateText = dateText,
+        dateDataText = dataText,
+        datePlacement = db.placement.wire,
+        dateCorner = db.corner.wire,
+        dateInsetX = 3.0f,
+        dateInsetY = 2.4f,
+        dateSize = db.size,
+        dateEv = db.brightnessEv,
+        dateDataInFrame = true,
+        )
+    }
 
     fun save(prefs: SharedPreferences) {
         val o = JSONObject()
@@ -95,6 +143,8 @@ data class EditState(
             .put("couplersActive", couplersActive).put("couplersAmount", couplersAmount.toDouble())
             .put("glareActive", glareActive).put("glareAmount", glareAmount.toDouble())
             .put("sharpen", sharpen)
+            .put("filmEdge", filmEdge.toJson())
+            .put("dateBack", dateBack.toJson())
         prefs.edit().putString(KEY, o.toString()).apply()
     }
 
@@ -138,6 +188,8 @@ data class EditState(
                     glareActive = o.optBoolean("glareActive", true),
                     glareAmount = f("glareAmount", 1f).coerceIn(GLARE_RANGE),
                     sharpen = o.optBoolean("sharpen", true),
+                    filmEdge = FilmEdgeSettings.fromJson(o.optJSONObject("filmEdge")),
+                    dateBack = DateBackSettings.fromJson(o.optJSONObject("dateBack")),
                 )
             }.getOrDefault(EditState())
         }

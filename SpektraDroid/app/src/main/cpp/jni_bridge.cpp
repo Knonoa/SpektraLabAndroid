@@ -25,6 +25,7 @@
 
 #include "android_image_decoder.hpp"
 #include "spektra_engine.hpp"
+#include "parallel.hpp"
 
 using namespace spk;
 
@@ -300,7 +301,7 @@ Java_com_spektralab_android_engine_SpektraNative_nativeImageInfo(JNIEnv* env, jo
 
 JNIEXPORT jlong JNICALL
 Java_com_spektralab_android_engine_SpektraNative_nativeLoadLinear(JNIEnv* env,jobject,jstring jpath,jint maxEdge) {
-    if (!jpath || maxEdge<1 || maxEdge>8192) { image_exception(env,"无效的图片尺寸"); return 0; }
+    if (!jpath || maxEdge<0 || maxEdge>65536) { image_exception(env,"无效的图片尺寸"); return 0; }
     const char* chars=env->GetStringUTFChars(jpath,nullptr);
     if (!chars) return 0;
     const std::string path(chars);
@@ -472,3 +473,39 @@ Java_com_spektralab_android_engine_SpektraNative_nativeRender(
 }
 
 }  // extern "C"
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_spektralab_android_engine_SpektraNative_applyMonitorLut(JNIEnv* env,jobject,jobject input,jobject output,jintArray jtable) {
+    AndroidBitmapInfo a{}, b{};
+    if (!input || !output || !jtable || env->GetArrayLength(jtable)!=17*17*17 ||
+        AndroidBitmap_getInfo(env,input,&a)!=0 || AndroidBitmap_getInfo(env,output,&b)!=0 ||
+        a.format!=ANDROID_BITMAP_FORMAT_RGBA_8888 || b.format!=ANDROID_BITMAP_FORMAT_RGBA_8888 ||
+        a.width!=b.width || a.height!=b.height || a.width>1280 || a.height>1280) {
+        image_exception(env,"无效的监看图像或颜色表"); return;
+    }
+    std::vector<jint> table(17*17*17);
+    env->GetIntArrayRegion(jtable,0,table.size(),table.data());
+    void* src=nullptr; void* dst=nullptr;
+    if (AndroidBitmap_lockPixels(env,input,&src)!=0) { image_exception(env,"无法读取监看图像");return; }
+    if (AndroidBitmap_lockPixels(env,output,&dst)!=0) { AndroidBitmap_unlockPixels(env,input);image_exception(env,"无法写入监看图像");return; }
+    parallel_for(a.height,[&](int y0,int y1) {
+        for(int y=y0;y<y1;++y) {
+            const auto* row=static_cast<const uint8_t*>(src)+y*a.stride;
+            auto* out=static_cast<uint8_t*>(dst)+y*b.stride;
+            for(uint32_t x=0;x<a.width;++x) {
+                const float r=row[x*4]*16.f/255.f,g=row[x*4+1]*16.f/255.f,bl=row[x*4+2]*16.f/255.f;
+                const int ri=std::min(int(r),15),gi=std::min(int(g),15),bi=std::min(int(bl),15);
+                const float dx=r-ri,dy=g-gi,dz=bl-bi;
+                float rgb[3]={};
+                for(int z=0;z<2;++z) for(int yy=0;yy<2;++yy) for(int xx=0;xx<2;++xx) {
+                    const float w=(xx?dx:1-dx)*(yy?dy:1-dy)*(z?dz:1-dz);
+                    const auto c=table[ri+xx+(gi+yy)*17+(bi+z)*289];
+                    rgb[0]+=((c>>16)&255)*w;rgb[1]+=((c>>8)&255)*w;rgb[2]+=(c&255)*w;
+                }
+                for(int c=0;c<3;++c) out[x*4+c]=uint8_t(std::clamp(int(rgb[c]+.5f),0,255));
+                out[x*4+3]=255;
+            }
+        }
+    });
+    AndroidBitmap_unlockPixels(env,output); AndroidBitmap_unlockPixels(env,input);
+}

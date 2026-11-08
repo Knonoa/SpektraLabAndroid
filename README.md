@@ -6,15 +6,19 @@ An unofficial Android port of [SpektraLab](https://github.com/JamesQiu2005/Spekt
 
 **[Download the latest APK](https://github.com/Knonoa/SpektraLabAndroid/releases/latest)** · [1.2 release notes](SpektraDroid/docs/releases/1.2.md) · [RAW validation](SpektraDroid/docs/RAW_VALIDATION.md)
 
+Development additions below are maintained on the [`dev` branch](https://github.com/Knonoa/SpektraLabAndroid/tree/dev) and are **not included in the published 1.2 APK**. See [Sony USB setup](SpektraDroid/docs/SONY_USB.md), [new validation](SpektraDroid/docs/USB_FULL_RAW_VALIDATION.md), and the [UI audit with outstanding issues](SpektraDroid/docs/UI_AUDIT.md).
+
 ## What it does
 
+- **Three work modes (development):** Workbench for imported photos, phone Camera, and USB Monitor. The in-app library supports search, source/type filters, photo/RAW review and video playback. Named recipes can be recalled in all modes; the workbench preserves its adjustments while Camera and Monitor share capture settings. See [workstation validation](SpektraDroid/docs/WORKSTATION_VALIDATION.md).
 - **Film and paper simulation:** 25 film stocks and 9 papers, exposure and enlarger controls, grain, halation, scattering, development couplers and scan sharpening. Native C++20 processing with a Kotlin / Jetpack Compose editor.
 - **Film Edge:** 135, half-frame, XPan and 120 formats; gates, perforations, stock markings, frame numbers, fog and light leaks. Borders enter the negative’s exposure and development pipeline.
 - **Date Back:** LCD-style or dot-matrix dates, plus available EXIF shooting data such as shutter speed, aperture and exposure compensation. The stock name appears on the film edge.
 - **Capture page:** CameraX viewfinder, live film preview, flash and zoom; camera inventory shows public logical/physical cameras and their reported capabilities. Supported physical lenses can be requested explicitly.
 - **Phone camera processing:** offers manufacturer CameraX extensions where exposed, with a Camera2 HDR scene-mode path on compatible devices. The system-camera button opens the phone’s camera and imports its returned image. Available modes depend on the device and what its camera app returns.
 - **RAW and TIFF import:** DNG, Sony ARW, Nikon NEF, Canon CR2/CR3 and classic TIFF/TIF, alongside ordinary image imports. Native linear float images feed the film engine; an 8-bit display bitmap is not the RAW processing source.
-- **Editing and output:** progressive 640/1600 px editor previews, zoom and split comparison, saved adjustment settings, cancellable JPEG export to `Pictures/SpektraLab`, with selectable output sizes up to a 4096 px source long edge. Film borders can enlarge the final canvas.
+- **Sony USB tethering (development):** PC Remote over USB/OTG, automatic original photo reception, 480p/720p bounded live monitoring, film colour preview and silent H.264 MP4 recording with optional camera parameter overlay. Protocol work references libgphoto2; physical camera validation is pending.
+- **Editing and output:** progressive 640/1600 px editor previews, zoom and split comparison, saved adjustment settings, cancellable JPEG export to `Pictures/SpektraLab`, with normal output sizes up to a 4096 px source long edge. An opt-in original-size mode checks available memory, preserves decoded dimensions and disables Film Edge for that export to retain composition. JPEG remains 8-bit; full-size processing requires a 64-bit device and substantial free memory. Film borders can enlarge the normal output canvas.
 
 ## Install
 
@@ -29,8 +33,9 @@ Version 1.2 uses application ID `com.spektralab.android`, version code `3`, with
 1. Open a photo with the document picker, or share/open it from a gallery. RAW providers sometimes classify files as generic binary data; the picker accepts that type too.
 2. Choose a film and paper; adjust exposure, enlarger settings and effects. Long-press to see the original, or use split comparison.
 3. Open the **片边** tab for Film Edge and Date Back. Borders crop the image centrally to the selected gate.
-4. Open **拍摄** to take a photo, optionally with live film preview. Use **系统相机** for modes available in the phone’s own camera application. The finished capture returns to the editor.
-5. Export a JPEG to the system gallery.
+4. Open **拍摄** to take a photo, optionally with live film preview. Use **系统相机** for modes available in the phone’s own camera application. In the development build, capture stays on the Camera page; review it in the media strip or open it in the workbench.
+5. For a Sony camera, open **连接 USB 相机**, set the camera to USB PC Remote and allow USB access. See the [connection guide](SpektraDroid/docs/SONY_USB.md).
+6. Export a JPEG to the system gallery. Enable **允许全尺寸处理**, then select **完整尺寸** for original decoded pixels without resizing or Film Edge cropping; smaller files captured by the camera remain smaller.
 
 ## Verified RAW support and limits
 
@@ -49,7 +54,7 @@ Real public RAW samples were downloaded, SHA-256 checked against their source in
 
 All 10 samples from these 9 cameras passed, as did 5 additional ARW/NEF/CR2/CR3/DNG regression samples. The debug test suite passed **10 tests, zero failures and zero skips**. Full results, modes, timings and checksums are in [RAW_VALIDATION.md](SpektraDroid/docs/RAW_VALIDATION.md) and [raw-fixtures.json](SpektraDroid/docs/raw-fixtures.json). Release-package validation is recorded in [the 1.2 notes](SpektraDroid/docs/releases/1.2.md).
 
-- Tested modes do not establish support for every RAW compression, crop, burst or orientation combination. Full-resolution / 4096 px RAW film export and device-specific performance have not been validated across these cameras.
+- Tested modes do not establish support for every RAW compression, crop, burst or orientation combination. Original-size decode, default film processing and JPEG dimensions passed for nine additional Sony samples (24–61 MP) on a high-memory emulator; see [the full-size results](SpektraDroid/docs/USB_FULL_RAW_VALIDATION.md). Other modes and device-specific performance remain unverified.
 - LibRaw `0.23.0-Snapshot202611` is pinned to an immutable official development snapshot for new Sony formats and Nikon HE/HE*. It is not a stable LibRaw release.
 - RAW conversion uses LibRaw’s **16-bit linear compatible output**, then float32 resizing, colour conversion and film processing. Integer demosaicing and that policy’s highlight clipping still apply. Display and JPEG output are 8-bit sRGB; 16-bit TIFF export is not implemented.
 - Large RAW files still require substantial memory. A full-frame A7R VI sample exposed an out-of-memory problem; releasing decoder buffers before bounded float allocation fixed the tested import path. Low-memory devices remain a separate validation target.
@@ -96,6 +101,7 @@ Android development is on this repository’s `main` branch. Contributions shoul
 - [spektrafilm](https://github.com/andreavolpato/spektrafilm), Andrea Volpato: film-process model, measured colour profiles and reference implementation. Additional black-and-white profiles: Hanze Qiu.
 - [SpektraLab](https://github.com/JamesQiu2005/SpektraLab): native reference engine, Film Edge and Date Back. [Knonoa/SpektraLabAndroid](https://github.com/Knonoa/SpektraLabAndroid): Android port.
 - Application and engine: **GPL-3.0-or-later**, see [LICENSE.txt](LICENSE.txt). Film/paper profiles and derived LUT data: **CC BY-SA 4.0**, with [upstream data terms](license/SPEKTRAFILM_LICENSE.txt).
+- [libgphoto2](https://github.com/gphoto/libgphoto2): Sony protocol reference and attribution, LGPL-2.0-or-later source headers; see [Sony USB references](SpektraDroid/docs/SONY_USB.md).
 - [LibRaw](https://github.com/LibRaw/LibRaw): LGPL-2.1 or CDDL; this distribution uses LGPL-2.1. TeX Gyre Heros: GUST Font License; DejaVu: its included font licence. stb: public-domain / MIT terms. AndroidX: Apache-2.0. Notices and texts are included in the APK assets and source tree.
 
 This is an **unofficial Android fork**, with no claim of endorsement by the upstream authors. SpektraLab’s name and icon have separate upstream trademark terms; the source/data licences do not grant trademark rights. See the [upstream project](https://github.com/JamesQiu2005/SpektraLab#trademark) before redistributing a renamed or branded derivative.

@@ -156,6 +156,7 @@ object SpektraNative {
     }
 
     fun imageInfo(path: String): IntArray = nativeImageInfo(path)
+    /** maxEdge=0 decodes the complete active image, without downscaling. */
     fun loadLinear(path: String, maxEdge: Int): LinearImage = LinearImage(nativeLoadLinear(path, maxEdge))
     fun renderLinear(handle: Long, source: LinearImage, out: Bitmap, params: NativeParams, token: Long): String? =
         nativeRenderLinear(handle, source.id, out, params, token)
@@ -169,6 +170,8 @@ object SpektraNative {
         handle: Long, source: Bitmap, sourceId: Long, out: Bitmap,
         params: NativeParams, token: Long,
     ): String? = nativeRender(handle, source, sourceId, out, params, token)
+
+    external fun applyMonitorLut(source: Bitmap, output: Bitmap, table: IntArray)
 
     private external fun nativeInit(assets: AssetManager): String?
     private external fun nativeCatalog(): String

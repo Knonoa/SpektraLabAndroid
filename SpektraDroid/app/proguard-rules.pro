@@ -14,9 +14,34 @@
 -keep class com.spektralab.android.ShootingData { *; }
 -keep class com.spektralab.android.ShootingData$* { *; }
 -keep class com.spektralab.android.PhotoIO { *; }
+-keep class com.spektralab.android.PhotoIO$* { *; }
 -keep class com.spektralab.android.camera.CameraInventory { *; }
 -keep class com.spektralab.android.camera.CameraDevice { *; }
 -keep class com.spektralab.android.camera.Lens { *; }
+-keep class com.spektralab.android.FullSizeExport { *; }
+-keep class com.spektralab.android.tether.** { *; }
+-keep class com.spektralab.android.EditorViewModel { *; }
+-keep class com.spektralab.android.MediaLibrary { *; }
+-keep class com.spektralab.android.MediaLibrary$* { *; }
+-keep class com.spektralab.android.MediaItem { *; }
+-keep class com.spektralab.android.MediaSource { *; }
+-keep class com.spektralab.android.MediaKind { *; }
+-keep class com.spektralab.android.MediaLibraryKt { *; }
+-keep class com.spektralab.android.RecipeStore { *; }
+-keep class com.spektralab.android.RecipeStore$* { *; }
+-keep class com.spektralab.android.FilmRecipe { *; }
+-keep class com.spektralab.android.Photo { *; }
+-keep class com.spektralab.android.RenderResult { *; }
+-keep class com.spektralab.android.UiMessage$* { *; }
+-keep interface com.spektralab.android.UiMessage { *; }
+-keep class com.spektralab.android.ExportSize { *; }
+-keep class androidx.lifecycle.ViewModel { *; }
+-keep class androidx.lifecycle.AndroidViewModel { *; }
+-keep class androidx.lifecycle.ViewModelStore { *; }
+-keep class androidx.lifecycle.ViewModelProvider { *; }
+-keep class androidx.lifecycle.ViewModelProvider$* { *; }
+# Coroutine calls also cross the independent release instrumentation boundary.
+-keep class kotlinx.coroutines.** { *; }
 
 # AndroidJUnitRunner calls Trace from the separate release instrumentation APK.
 # Preserve this small shared API when shrinking the app independently of tests.

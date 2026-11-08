@@ -11,6 +11,7 @@ import com.spektralab.android.engine.Catalog
 import com.spektralab.android.engine.SpektraNative
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -49,6 +50,7 @@ class Photo(
     fun closeLinear() {
         linearDraft?.close()
         linearPreview?.close()
+        PhotoIO.releaseNativeSource(nativeSourcePath)
     }
 }
 
@@ -63,6 +65,7 @@ enum class ExportSize(val label: String, val maxEdge: Int) {
     S2048("2048 px", 2048),
     S3072("3072 px", 3072),
     S4096("4096 px", 4096),
+    ORIGINAL("完整尺寸", Int.MAX_VALUE),
 }
 
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
@@ -73,6 +76,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    val fullSizeEnabled = MutableStateFlow(prefs.getBoolean("full_size_export", false))
+    val exportStage = MutableStateFlow("")
+    fun enableFullSize(enabled: Boolean) {
+        fullSizeEnabled.value = enabled
+        prefs.edit().putBoolean("full_size_export", enabled).apply()
+    }
 
     private val _state = MutableStateFlow(EditState.load(prefs))
     val state: StateFlow<EditState> = _state
@@ -103,41 +113,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private var photoCounter = 0L
     private var loadJob: Job? = null
 
-    init {
-        viewModelScope.launch(renderDispatcher) {
-            val err = SpektraNative.init(app.assets)
-            if (err != null) {
-                engineError.value = err
-                return@launch
-            }
-            catalog.value = SpektraNative.catalog()
-            previewHandle = SpektraNative.create()
-            draftHandle = SpektraNative.create()
-            // a stock that no longer exists in the catalogue falls back to defaults
-            val s = _state.value
-            val cat = catalog.value
-            if (cat.film(s.filmStock) == null || (!s.scanFilm && cat.paper(s.printStock) == null)) {
-                _state.value = EditState()
-            }
-            if (_state.value.filmEdge.cameraSeed <= 0) {
-                val body = 1 + kotlin.random.Random.nextInt(999)
-                _state.value = _state.value.let { it.copy(filmEdge = it.filmEdge.copy(cameraSeed = body)) }
-                persist()
-            }
-            engineReady.value = true
-            startRenderLoop()
-            if (photo.value != null) requestRender(RenderMode.DRAFT_THEN_FULL)
-        }
-    }
-
     // ---------------------------------------------------------------- photo
 
-    fun loadPhoto(uri: Uri) {
+    fun loadPhoto(incomingUri: Uri, recipe: EditState? = null) {
         if (exporting.value) {
             _messages.tryEmit(UiMessage.Text("请等待当前照片保存完成"))
             return
         }
         val ctx = getApplication<Application>()
+        val initialRecipe = recipe ?: _state.value
         loadJob?.cancel()
         loadingPhoto.value = true
         loadJob = viewModelScope.launch {
@@ -145,11 +129,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             var published = false
             try {
                 withContext(Dispatchers.IO) {
+                    val uri = MediaLibrary.retainImport(ctx, incomingUri)
                     var linear: SpektraNative.LinearImage? = null
                     var linearDraft: SpektraNative.LinearImage? = null
+                    var nativePath: String? = null
                     try {
                         val info = PhotoIO.info(ctx, uri)
-                        val nativePath = PhotoIO.nativePath(ctx, uri)
+                        nativePath = PhotoIO.nativePath(ctx, uri)
                         linear = nativePath?.let { SpektraNative.loadLinear(it, PREVIEW_EDGE) }
                         val preview = linear?.bitmap() ?: PhotoIO.decode(ctx, uri, PREVIEW_EDGE)
                             ?: error("无法读取这张照片")
@@ -164,13 +150,17 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                             frameSeed = 1 + (uri.toString().hashCode() and 0x7fffffff) % 1_000_000,
                             linearPreview = linear, linearDraft = linearDraft, nativeSourcePath = nativePath,
                         )
+                        MediaLibrary.get(ctx).add(uri, info?.name ?: MediaLibrary.displayName(ctx, uri), MediaSource.IMPORT, recipe = initialRecipe)
                     } catch (t: Throwable) {
                         linearDraft?.close(); linear?.close()
+                        PhotoIO.releaseNativeSource(nativePath)
                         throw t
                     }
                 }
                 val previous = photo.value
+                if (recipe != null) _state.value = recipe
                 photo.value = loaded
+                if (recipe != null) persist()
                 published = true
                 // Serialize retirement with any render still using the previous image.
                 renderDispatcher.executor.execute { previous?.closeLinear() }
@@ -197,6 +187,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
      * draft tier renders until [commit] is called on release.
      */
     fun update(interactive: Boolean = false, transform: (EditState) -> EditState) {
+        if (exporting.value) return
         val old = _state.value
         val new = transform(old)
         if (new == old) return
@@ -233,6 +224,16 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     fun selectPaper(stock: String) = update { it.copy(printStock = stock, scanFilm = false) }
     fun selectScanFilm() = update { it.copy(scanFilm = true) }
 
+    fun applyRecipe(recipe: EditState): String? {
+        if (exporting.value) return "请等待当前照片保存完成"
+        val cat = catalog.value
+        if (!engineReady.value || cat.film(recipe.filmStock) == null || (!recipe.scanFilm && cat.paper(recipe.printStock) == null)) {
+            return "当前版本不支持此配方的胶片或相纸"
+        }
+        update { recipe }
+        return null
+    }
+
     /** Back to the defaults, keeping the chosen stocks and format. */
     fun resetAdjustments() = update {
         EditState(
@@ -241,11 +242,35 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    private var workbenchState: EditState? = null
+    private var captureState: EditState? = null
+    var rememberPhotoEdits = true
+        set(value) {
+            if (field == value) return
+            if (value) {
+                captureState = _state.value
+                workbenchState?.let { _state.value = it }
+            } else {
+                workbenchState = _state.value
+                captureState?.let { _state.value = it }
+            }
+            field = value
+            if (value) requestRender(RenderMode.DRAFT_THEN_FULL)
+        }
+    private val pendingPhotoEdits = linkedMapOf<Uri, EditState>()
     private fun persist() {
         saveJob?.cancel()
-        saveJob = viewModelScope.launch(Dispatchers.IO) {
+        val editedUri = if (rememberPhotoEdits) photo.value?.uri else null
+        val editedState = _state.value
+        editedUri?.let { pendingPhotoEdits[it] = editedState }
+        saveJob = viewModelScope.launch {
             delay(400)
-            _state.value.save(prefs)
+            val updates = pendingPhotoEdits.toMap()
+            pendingPhotoEdits.clear()
+            withContext(Dispatchers.IO) {
+                editedState.save(prefs)
+                updates.forEach { (uri, state) -> MediaLibrary.get(getApplication()).rememberEdit(uri, state) }
+            }
         }
     }
 
@@ -259,6 +284,34 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val requests = Channel<Request>(Channel.CONFLATED)
     @Volatile private var draftInFlight = false
     @Volatile private var lastPublished = 0L
+
+    // All queues and persistence fields must exist before the worker starts.
+    init {
+        viewModelScope.launch(renderDispatcher) {
+            val err = SpektraNative.init(app.assets)
+            if (err != null) {
+                engineError.value = err
+                return@launch
+            }
+            catalog.value = SpektraNative.catalog()
+            previewHandle = SpektraNative.create()
+            draftHandle = SpektraNative.create()
+            // a stock that no longer exists in the catalogue falls back to defaults
+            val s = _state.value
+            val cat = catalog.value
+            if (cat.film(s.filmStock) == null || (!s.scanFilm && cat.paper(s.printStock) == null)) {
+                _state.value = EditState()
+            }
+            if (_state.value.filmEdge.cameraSeed <= 0) {
+                val body = 1 + kotlin.random.Random.nextInt(999)
+                _state.value = _state.value.let { it.copy(filmEdge = it.filmEdge.copy(cameraSeed = body)) }
+                persist()
+            }
+            engineReady.value = true
+            startRenderLoop()
+            if (photo.value != null) requestRender(RenderMode.DRAFT_THEN_FULL)
+        }
+    }
 
     private fun startRenderLoop() {
         viewModelScope.launch(renderDispatcher) {
@@ -289,6 +342,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun requestRender(mode: RenderMode, keepDraft: Boolean = false) {
+        if (!rememberPhotoEdits) return
         val p = photo.value ?: return
         if (!engineReady.value) return
         val t = token.incrementAndGet()
@@ -353,13 +407,23 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val p = photo.value ?: return
         if (exporting.value) return
         val ctx = getApplication<Application>()
-        val s = _state.value
+        val full = size == ExportSize.ORIGINAL
+        if (full && !fullSizeEnabled.value) return
+        val s = if (full) _state.value.copy(filmEdge = _state.value.filmEdge.copy(active = false)) else _state.value
         exporting.value = true
+        exportStage.value = "准备导出"
         exportJob = viewModelScope.launch {
             try {
-                var edge = minOf(size.maxEdge, maxOf(p.fullWidth, p.fullHeight))
+                val edge = minOf(size.maxEdge, maxOf(p.fullWidth, p.fullHeight))
+                if (full) {
+                    val estimated = FullSizeExport.estimatedBytes(p.fullWidth,p.fullHeight,p.fullWidth,p.fullHeight)
+                    withContext(renderDispatcher) {
+                        SpektraNative.dropCaches(previewHandle); SpektraNative.dropCaches(draftHandle)
+                    }
+                    FullSizeExport.checkMemory(ctx, estimated)
+                }
                 var savedUri: Uri? = null
-                while (savedUri == null) {
+                run {
                     var source: SpektraNative.LinearImage? = null
                     var bmp: Bitmap? = null
                     var out: Bitmap? = null
@@ -367,12 +431,18 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                     try {
                         // Decode the original again at the export tier, retaining float
                         // precision through metering, film exposure and development.
+                        exportStage.value = if (full) "解码完整尺寸原图" else "解码原图"
                         withContext(Dispatchers.IO) {
-                            if (p.nativeSourcePath != null) source = SpektraNative.loadLinear(p.nativeSourcePath, edge)
+                            if (p.nativeSourcePath != null) source = SpektraNative.loadLinear(p.nativeSourcePath, if (full) 0 else edge)
                             else bmp = PhotoIO.decode(ctx, p.uri, edge) ?: error("无法读取原图")
                         }
+                        coroutineContext.ensureActive()
                         val w = source?.width ?: bmp!!.width
                         val h = source?.height ?: bmp!!.height
+                        if (full) check(w == p.fullWidth && h == p.fullHeight) {
+                            "解码尺寸 $w × $h 与源图 ${p.fullWidth} × ${p.fullHeight} 不一致，已停止导出"
+                        }
+                        exportStage.value = "胶片曝光、显影与扫描"
                         val params = s.toNative(seed = p.id * 7919L, frame = frameOf(s, p))
                         val outSize = SpektraNative.outputSize(params, w, h) ?: error("胶片边框无法用于这个画幅")
                         out = Bitmap.createBitmap(outSize[0], outSize[1], Bitmap.Config.ARGB_8888)
@@ -398,19 +468,26 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     val output = requireNotNull(out)
                     when (err) {
-                        null -> savedUri = withContext(Dispatchers.IO) {
-                            PhotoIO.saveJpeg(ctx, output, exportName(p, s))
-                        }.also { output.recycle() }
+                        null -> try {
+                            coroutineContext.ensureActive()
+                            savedUri = withContext(Dispatchers.IO) {
+                                exportStage.value = "编码并保存 JPEG"
+                                PhotoIO.saveJpeg(ctx, output, exportName(p, s))
+                            }
+                        } finally { output.recycle() }
                         "cancelled" -> { output.recycle(); return@launch }
                         "out of memory" -> {
                             output.recycle()
-                            if (edge <= 1600) throw IllegalStateException("内存不足")
-                            edge = (edge * 0.7f).toInt()
+                            throw IllegalStateException("内存不足，未降低导出尺寸，请选择较小尺寸")
                         }
                         else -> { output.recycle(); throw IllegalStateException(err) }
                     }
                 }
-                _messages.tryEmit(UiMessage.Saved(savedUri!!))
+                withContext(Dispatchers.IO) {
+                    MediaLibrary.get(ctx).add(requireNotNull(savedUri), exportName(p, s), MediaSource.EXPORT,
+                        recipe = s, parentUri = p.uri.toString())
+                }
+                _messages.tryEmit(UiMessage.Saved(requireNotNull(savedUri)))
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e   // the user cancelled: no message
             } catch (e: OutOfMemoryError) {
@@ -427,7 +504,6 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val h = exportHandle
         if (h != 0L) SpektraNative.setWanted(h, -1L)
         exportJob?.cancel()
-        exporting.value = false
     }
 
     /** The live film preview's params: the chosen film and paper, no film edge and no date (a viewfinder). */

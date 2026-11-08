@@ -26,6 +26,9 @@ import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCase
 import androidx.camera.core.ZoomState
+import androidx.camera.core.FocusMeteringAction
+import androidx.camera.core.MeteringPoint
+import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
@@ -41,6 +44,9 @@ import androidx.lifecycle.Observer
 import androidx.lifecycle.viewModelScope
 import com.spektralab.android.engine.NativeParams
 import com.spektralab.android.engine.SpektraNative
+import com.spektralab.android.EditState
+import com.spektralab.android.MediaLibrary
+import com.spektralab.android.MediaSource
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -77,6 +83,8 @@ enum class Flash(val label: String, val mode: Int) {
     ON("开", ImageCapture.FLASH_MODE_ON),
 }
 
+enum class MeteringMode(val label: String) { AUTO("自动测光"), CENTER("中央区域"), SPOT("点按测光") }
+
 data class CameraUiState(
     val cameras: List<CameraDevice> = emptyList(),
     val selectedId: String? = null,
@@ -95,6 +103,15 @@ data class CameraUiState(
     val activePhysicalId: String? = null,
     val zoomMin: Float = 1f,
     val zoomMax: Float = 1f,
+    val exposureMin: Int = 0,
+    val exposureMax: Int = 0,
+    val exposureIndex: Int = 0,
+    val exposureStep: Float = 0f,
+    val metering: MeteringMode = MeteringMode.AUTO,
+    val regionMetering: Boolean = false,
+    val focusX: Float? = null,
+    val focusY: Float? = null,
+    val meteringMessage: String = "",
 ) {
     val selected: CameraDevice? get() = cameras.firstOrNull { it.id == selectedId }
 }
@@ -151,6 +168,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private var liveHandle = 0L
     /** the editor's film and paper, for the live preview (no film edge, no date: a viewfinder) */
     @Volatile var liveParams: (() -> NativeParams)? = null
+    @Volatile var recipe: (() -> EditState)? = null
+    private var exposureRequest = 0L
 
     fun start(lifecycleOwner: LifecycleOwner, view: PreviewView) {
         owner = lifecycleOwner
@@ -279,6 +298,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             liveFrame.value = null
             cam.cameraInfo.zoomState.observeForever(zoomObserver)
             _ui.value = _ui.value.copy(modes = modes, mode = mode, bound = true, error = null, hdrVia = hdrVia, activePhysicalId = null)
+            val exposure = cam.cameraInfo.exposureState
+            val center = SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(.5f, .5f)
+            val canMeter = cam.cameraInfo.isFocusMeteringSupported(FocusMeteringAction.Builder(center, FocusMeteringAction.FLAG_AE).build())
+            _ui.update { it.copy(exposureMin = if (exposure.isExposureCompensationSupported) exposure.exposureCompensationRange.lower else 0,
+                exposureMax = if (exposure.isExposureCompensationSupported) exposure.exposureCompensationRange.upper else 0,
+                exposureIndex = exposure.exposureCompensationIndex, exposureStep = exposure.exposureCompensationStep.toFloat(),
+                regionMetering = canMeter, metering = MeteringMode.AUTO, focusX = null, focusY = null, meteringMessage = "") }
             Log.i(TAG, "Bound camera=$id physical=${state.physicalId ?: "auto"} mode=$mode HDR=$hdrVia filmPreview=${state.filmPreview && !viaExtension}")
             if (state.filmPreview && !viaExtension) {
                 previewHandler.removeCallbacks(previewPoll)
@@ -339,10 +365,70 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     fun scaleZoom(factor: Float) = setZoom(_ui.value.zoom * factor)
 
+    fun setExposure(index: Int) {
+        val cam = camera ?: return
+        val state = _ui.value
+        if (!state.bound || state.capturing || state.exposureMin == state.exposureMax) return
+        val request = ++exposureRequest
+        val generation = bindingGeneration
+        viewModelScope.launch {
+            try {
+                val applied = cam.cameraControl.setExposureCompensationIndex(index.coerceIn(state.exposureMin, state.exposureMax)).await()
+                if (generation == bindingGeneration && request == exposureRequest) _ui.update { it.copy(exposureIndex = applied) }
+            } catch (e: Exception) {
+                if (generation == bindingGeneration && request == exposureRequest) reportError("曝光调整未生效：${e.message}")
+            }
+        }
+    }
+
+    fun setMetering(mode: MeteringMode) {
+        val cam = camera ?: return
+        if (_ui.value.capturing) return
+        if (mode != MeteringMode.AUTO && !_ui.value.regionMetering) return
+        cam.cameraControl.cancelFocusAndMetering()
+        _ui.update { it.copy(metering = mode, focusX = null, focusY = null,
+            meteringMessage = if (mode == MeteringMode.SPOT) "点按取景画面选择测光点" else "") }
+        if (mode == MeteringMode.CENTER) previewView?.let { view ->
+            meter(view.meteringPointFactory.createPoint(view.width / 2f, view.height / 2f, .35f), .5f, .5f, false)
+        }
+    }
+
+    fun tapMeter(point: MeteringPoint, x: Float, y: Float) {
+        if (_ui.value.capturing || !_ui.value.bound) return
+        _ui.update { it.copy(metering = if (it.regionMetering) MeteringMode.SPOT else it.metering) }
+        meter(point, x, y, true)
+    }
+
+    private fun meter(point: MeteringPoint, x: Float, y: Float, focus: Boolean) {
+        val cam = camera ?: return
+        val generation = bindingGeneration
+        val ae = _ui.value.regionMetering
+        val aeAction = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AE).disableAutoCancel().build()
+        val afAction = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF).build()
+        val af = focus && cam.cameraInfo.isFocusMeteringSupported(afAction)
+        if ((!ae || !cam.cameraInfo.isFocusMeteringSupported(aeAction)) && !af) {
+            _ui.update { it.copy(meteringMessage = "此模式不支持区域测光或对焦") }; return
+        }
+        val flags = (if (ae) FocusMeteringAction.FLAG_AE else 0) or (if (af) FocusMeteringAction.FLAG_AF else 0)
+        val action = FocusMeteringAction.Builder(point, flags).disableAutoCancel().build()
+        _ui.update { it.copy(focusX = x, focusY = y, meteringMessage = if (ae) "测光区域已更新" else "已请求点按对焦；设备不支持区域测光") }
+        viewModelScope.launch {
+            runCatching { cam.cameraControl.startFocusAndMetering(action).await() }.onFailure { e ->
+                if (generation == bindingGeneration) _ui.update { it.copy(meteringMessage = "测光 / 对焦未生效：${e.message}") }
+            }
+        }
+    }
+
     fun setFilmPreview(on: Boolean) {
         if (_ui.value.capturing || on == _ui.value.filmPreview) return
+        val s = _ui.value
+        val extensionSession = s.mode != CaptureMode.STANDARD && !(s.mode == CaptureMode.HDR && s.hdrVia == "HAL HDR 场景模式")
+        if (on && extensionSession) return
         _ui.value = _ui.value.copy(filmPreview = on)
-        bind()
+        // Preview processing does not need a new camera session. Rebinding here
+        // would silently reset the user's exposure and selected AE/AF region.
+        previewHandler.removeCallbacks(previewPoll)
+        if (on && s.bound) previewHandler.post(previewPoll) else liveFrame.value = null
     }
 
     /** From an OrientationEventListener: keeps the JPEG's orientation right when the phone turns. */
@@ -364,8 +450,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         val ctx = getApplication<Application>()
         _ui.value = _ui.value.copy(capturing = true)
         val zoomAtShot = _ui.value.zoom
+        val recipeAtShot = recipe?.invoke()
         val cam = _ui.value.selected
-        val name = "SPK_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val name = "SPK_" + SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, "$name.jpg")
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
@@ -384,10 +471,17 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 val uri = output.savedUri
                 if (uri != null && cam != null) fillEquivalentFocal(uri, cam, zoomAtShot, physicalAtShot)
                 if (uri != null) publish(uri)
-                Log.i(TAG, "Capture saved; EXIF updated; opening editor")
-                _ui.value = _ui.value.copy(capturing = false)
-                if (uri != null) _captured.tryEmit(uri)
-                else _ui.value = _ui.value.copy(error = "照片已拍摄，但没有拿到保存位置")
+                Log.i(TAG, "Capture saved; adding to in-app library")
+                if (uri != null) viewModelScope.launch {
+                    try {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            MediaLibrary.get(ctx).add(uri, "$name.jpg", MediaSource.CAMERA, recipe = recipeAtShot)
+                        }
+                        _captured.emit(uri)
+                    } catch (e: Exception) { reportError("照片已保存，素材目录更新失败：${e.message}") }
+                    finally { _ui.update { it.copy(capturing = false) } }
+                }
+                else _ui.value = _ui.value.copy(capturing = false, error = "照片已拍摄，但没有拿到保存位置")
             }
 
             override fun onError(e: ImageCaptureException) {
@@ -446,11 +540,30 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (valid) {
                 publish(uri)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    MediaLibrary.get(getApplication()).add(uri, MediaLibrary.displayName(getApplication(), uri),
+                        MediaSource.CAMERA, recipe = recipe?.invoke())
+                }
                 _captured.emit(uri)
             } else {
                 discard(uri)
                 reportError("系统相机没有返回照片，可用完整系统相机拍摄后从相册导入。")
             }
+        }
+    }
+
+    fun importSystemPhoto(uri: Uri) {
+        val state = recipe?.invoke()
+        viewModelScope.launch {
+            try {
+                val retained = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val ctx = getApplication<Application>()
+                    val saved = MediaLibrary.retainImport(ctx, uri)
+                    MediaLibrary.get(ctx).add(saved, MediaLibrary.displayName(ctx, uri), MediaSource.CAMERA, recipe = state)
+                    saved
+                }
+                _captured.emit(retained)
+            } catch (e: Exception) { reportError("导入失败：${e.message}") }
         }
     }
 

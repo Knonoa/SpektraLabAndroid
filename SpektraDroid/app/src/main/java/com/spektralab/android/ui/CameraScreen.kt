@@ -2,6 +2,11 @@ package com.spektralab.android.ui
 
 import android.Manifest
 import com.spektralab.android.PhotoIO
+import com.spektralab.android.EditorViewModel
+import com.spektralab.android.MediaLibrary
+import com.spektralab.android.MediaItem
+import com.spektralab.android.MediaSource
+import com.spektralab.android.camera.MeteringMode
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.content.Intent
@@ -9,17 +14,23 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.view.OrientationEventListener
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.Surface
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -29,9 +40,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -72,6 +85,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -96,12 +110,13 @@ import java.util.Locale
  * The capture page. CameraX on whichever camera the phone exposes, its lenses
  * by zoom ratio, the maker's own HDR / night processing where the device has
  * it, and a hand-off to the system camera app for everything else. A shot
- * goes straight to the editor ([onCaptured]).
+ * stays on this page and appears in the media strip.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CameraScreen(
-    onCaptured: (Uri) -> Unit,
+    editor: EditorViewModel,
+    onEdit: (MediaItem) -> Unit,
     onBack: () -> Unit,
     /** the editor's film and paper, for the live film preview */
     liveParams: () -> NativeParams,
@@ -116,6 +131,9 @@ fun CameraScreen(
     }
     var denied by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
+    var panel by rememberSaveable { mutableStateOf("") }
+    val library = remember(context) { MediaLibrary.get(context) }
+    vm.recipe = { editor.state.value }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         granted = ok
         denied = !ok
@@ -124,14 +142,14 @@ fun CameraScreen(
     vm.liveParams = liveParams
     BackHandler(onBack = onBack)
 
-    LaunchedEffect(vm) { vm.captured.collect { onCaptured(it) } }
+
 
     // The system camera app: the phone's full processing (HDR, night, its own lens logic).
     var systemUriText by rememberSaveable { mutableStateOf<String?>(null) }
     var showSystemCamera by rememberSaveable { mutableStateOf(false) }
     var offerImport by rememberSaveable { mutableStateOf(false) }
     val importPhoto = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) onCaptured(uri)
+        if (uri != null) vm.importSystemPhoto(uri)
     }
     val fullCamera = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         // STILL_IMAGE_CAMERA has no result contract. The user picks the file
@@ -188,7 +206,7 @@ fun CameraScreen(
         ) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = Palette.Text) }
             Column(Modifier.weight(1f)) {
-                Text("拍摄", color = Palette.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text("相机", color = Palette.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Text(ui.selected?.let { describe(it, ui.zoom, ui.physicalId, ui.activePhysicalId) } ?: "", color = Palette.TextDim, fontSize = 11.sp)
             }
             if (ui.selected?.hasFlash == true) {
@@ -204,9 +222,10 @@ fun CameraScreen(
             }
         }
 
-        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+        val finder: @Composable (Modifier) -> Unit = { modifier ->
+        BoxWithConstraints(modifier.clipToBounds(), contentAlignment = Alignment.Center) {
             if (granted) {
-                Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f)) {
+                Box(Modifier.size(width = minOf(maxWidth, maxHeight * .75f), height = minOf(maxHeight, maxWidth / .75f)).clipToBounds()) {
                     Viewfinder(vm)
                     val frame = live
                     if (ui.filmPreview && frame != null) {
@@ -239,6 +258,12 @@ fun CameraScreen(
                             }
                         }
                     }
+                    if (ui.focusX != null && ui.focusY != null) Canvas(Modifier.fillMaxSize()) {
+                        val x = ui.focusX!! * size.width; val y = ui.focusY!! * size.height
+                        val edge = 44.dp.toPx()
+                        drawRect(Palette.Amber, androidx.compose.ui.geometry.Offset(x-edge/2,y-edge/2),
+                            androidx.compose.ui.geometry.Size(edge,edge), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+                    }
                     if (ui.capturing) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Palette.Amber)
                 }
             } else {
@@ -253,18 +278,44 @@ fun CameraScreen(
             }
         }
 
+        }
+
+        val controls: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {
+        Column(Modifier.fillMaxWidth().background(Palette.Panel).padding(horizontal = 16.dp, vertical = 8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                CaptureMode.entries.filter { it in ui.modes }.forEach { m ->
+                    Chip(m.label, m == ui.mode && ui.physicalId == null, enabled = !ui.capturing) { vm.setMode(m) }
+                }
+                Chip("拍摄参数", panel == "shoot") { panel = if (panel == "shoot") "" else "shoot" }
+                Chip("胶片参数", panel == "film") { panel = if (panel == "film") "" else "film" }
+                val extensionSession = ui.mode != CaptureMode.STANDARD && !(ui.mode == CaptureMode.HDR && ui.hdrVia == "HAL HDR 场景模式")
+                Chip("胶片预览", ui.filmPreview, enabled = !extensionSession && !ui.capturing) { vm.setFilmPreview(!ui.filmPreview) }
+            }
+        }
+
+        if (panel == "film") LiveFilmControls(editor, height = 210.dp)
+        if (panel == "shoot") Column(Modifier.fillMaxWidth().background(Palette.Panel).padding(horizontal = 16.dp)) {
+            if (ui.exposureMin < ui.exposureMax) {
+                var exposure by remember(ui.exposureIndex, ui.selectedId, ui.mode) { mutableStateOf(ui.exposureIndex.toFloat()) }
+                ParamSlider("相机曝光补偿", exposure,
+                    ui.exposureMin.toFloat()..ui.exposureMax.toFloat(), 0f,
+                    { String.format(Locale.US, "%+.1f EV", it * ui.exposureStep) },
+                    { exposure = it }, { vm.setExposure(exposure.toInt()) }, enabled = ui.bound && !ui.capturing,
+                    steps = (ui.exposureMax-ui.exposureMin-1).coerceAtLeast(0))
+            } else Text("此摄像头 / 模式未开放曝光补偿", color = Palette.TextDim, fontSize = 12.sp)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MeteringMode.entries.forEach { mode -> Chip(mode.label, ui.metering == mode,
+                    enabled = ui.bound && !ui.capturing && (mode == MeteringMode.AUTO || ui.regionMetering)) { vm.setMetering(mode) } }
+            }
+            Text(ui.meteringMessage.ifBlank { "点按画面选择对焦 / 测光区域，双指缩放；相机曝光与胶片曝光分别调整。" },
+                color = Palette.TextDim, fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
+        }
+        MediaStrip(library, MediaSource.CAMERA, onEdit, enabled = !ui.capturing)
         Column(
             Modifier.fillMaxWidth().background(Palette.Panel)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         ) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CaptureMode.entries.filter { it in ui.modes }.forEach { m ->
-                    Chip(m.label, m == ui.mode && ui.physicalId == null, enabled = !ui.capturing) { vm.setMode(m) }
-                }
-                val extensionSession = ui.mode != CaptureMode.STANDARD && !(ui.mode == CaptureMode.HDR && ui.hdrVia == "HAL HDR 场景模式")
-                Chip("胶片预览", ui.filmPreview, enabled = !extensionSession && !ui.capturing) { vm.setFilmPreview(!ui.filmPreview) }
-            }
             val note = when {
                 !ui.bound -> null
                 ui.mode == CaptureMode.HDR && ui.hdrVia == "HAL HDR 场景模式" -> "已请求手机的 HDR 场景模式；实际处理效果由手机决定。"
@@ -272,11 +323,15 @@ fun CameraScreen(
                 CaptureMode.HDR !in ui.modes -> "这台设备没有向第三方开放 HDR；可用「系统相机」拍摄，用手机自带的处理。"
                 else -> null
             }
-            if (note != null) {
+            if (note != null && panel.isBlank()) {
                 Text(note, color = Palette.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
+        }
+
+        }
+        val shutter: @Composable () -> Unit = {
             Row(
-                Modifier.fillMaxWidth().padding(top = 12.dp),
+                Modifier.fillMaxWidth().background(Palette.Panel).padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(onClick = { showSystemCamera = true }, enabled = !ui.capturing) { Text("系统相机", color = Palette.Text) }
@@ -291,6 +346,22 @@ fun CameraScreen(
                 }
             }
         }
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+            val controlsHeight = maxHeight * .57f
+            if (maxWidth > maxHeight && maxWidth >= 600.dp) {
+                Row(Modifier.fillMaxSize()) {
+                    finder(Modifier.weight(1f).fillMaxHeight())
+                    Column(Modifier.width(340.dp).fillMaxHeight()) {
+                        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) { controls() }
+                        shutter()
+                    }
+                }
+            } else Column(Modifier.fillMaxSize()) {
+                finder(Modifier.fillMaxWidth().weight(1f))
+                Column(Modifier.fillMaxWidth().heightIn(max = controlsHeight).verticalScroll(rememberScrollState())) { controls() }
+                shutter()
+            }
+        }
     }
 
     if (showSystemCamera) AlertDialog(
@@ -302,7 +373,7 @@ fun CameraScreen(
                 TextButton(onClick = { showSystemCamera = false; launchSystem() }) {
                     Text("拍照并回传", color = Palette.Amber)
                 }
-                Text("拍完直接进入冲印。部分手机在此入口只提供基础拍照模式。", fontSize = 12.sp)
+                Text("拍完保留在本页素材栏。部分手机在此入口只提供基础拍照模式。", fontSize = 12.sp)
                 TextButton(onClick = {
                     showSystemCamera = false
                     runCatching { fullCamera.launch(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)) }
@@ -358,7 +429,21 @@ private fun Viewfinder(vm: CameraViewModel) {
                 val pinch = ScaleGestureDetector(ctx, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
                     override fun onScale(d: ScaleGestureDetector): Boolean { vm.scaleZoom(d.scaleFactor); return true }
                 })
-                setOnTouchListener { _, ev -> pinch.onTouchEvent(ev); true }
+                val taps = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+                    override fun onDown(e: MotionEvent) = true
+                    override fun onSingleTapUp(e: MotionEvent): Boolean {
+                        if (!pinch.isInProgress && width > 0 && height > 0) {
+                            vm.tapMeter(meteringPointFactory.createPoint(e.x, e.y, .12f), e.x/width, e.y/height)
+                            performClick()
+                        }
+                        return true
+                    }
+                })
+                setOnTouchListener { _, ev ->
+                    pinch.onTouchEvent(ev)
+                    taps.onTouchEvent(ev)
+                    true
+                }
                 vm.start(lifecycle, this)
             }
         },

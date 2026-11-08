@@ -24,6 +24,7 @@ import kotlin.math.roundToInt
 
 /** Photo decoding (EXIF-oriented, sRGB, ARGB_8888) and saving. */
 object PhotoIO {
+    private val editorSources = mutableMapOf<String, Int>()
 
     data class Info(val width: Int, val height: Int, val name: String)
 
@@ -31,8 +32,7 @@ object PhotoIO {
     fun info(context: Context, uri: Uri): Info? {
         val name = displayName(context, uri)
         if (isNativeFormat(context, uri, name)) {
-            val file = materialize(context, uri, name)
-            val size = SpektraNative.imageInfo(file.absolutePath)
+            val size = synchronized(this) { SpektraNative.imageInfo(materialize(context, uri, name).absolutePath) }
             return Info(size[0], size[1], name)
         }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -63,7 +63,9 @@ object PhotoIO {
     fun decode(context: Context, uri: Uri, maxEdge: Int): Bitmap? {
         val name = displayName(context, uri)
         if (isNativeFormat(context, uri, name)) {
-            return SpektraNative.loadLinear(materialize(context, uri, name).absolutePath, maxEdge).use { it.bitmap() }
+            return synchronized(this) {
+                SpektraNative.loadLinear(materialize(context, uri, name).absolutePath, maxEdge).use { it.bitmap() }
+            }
         }
         val bmp = if (Build.VERSION.SDK_INT >= 28) decodeP(context, uri, maxEdge)
         else decodeLegacy(context, uri, maxEdge)
@@ -157,7 +159,7 @@ object PhotoIO {
         return m
     }
 
-    private fun displayName(context: Context, uri: Uri): String = runCatching {
+    private fun displayName(context: Context, uri: Uri): String = if (uri.scheme == "file") uri.lastPathSegment ?: "photo" else runCatching {
         if (uri.scheme == "file") return@runCatching uri.path?.let(::File)?.name
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null
@@ -173,9 +175,16 @@ object PhotoIO {
     }
 
     /** Non-null for high-precision formats. Their engine input must stay native. */
-    fun nativePath(context: Context, uri: Uri): String? {
+    @Synchronized fun nativePath(context: Context, uri: Uri): String? {
         val name = displayName(context, uri)
-        return if (isNativeFormat(context, uri, name)) materialize(context, uri, name).absolutePath else null
+        return (if (isNativeFormat(context, uri, name)) materialize(context, uri, name).absolutePath else null)
+            .also { if (it != null) editorSources[it] = (editorSources[it] ?: 0) + 1 }
+    }
+
+    @Synchronized fun releaseNativeSource(path: String?) {
+        if (path == null) return
+        val count = editorSources[path] ?: return
+        if (count <= 1) editorSources.remove(path) else editorSources[path] = count - 1
     }
 
     // RAW MIME types vary across document providers; some export all RAW as
@@ -203,8 +212,9 @@ object PhotoIO {
         val out = File(dir, "$key.$extension")
         synchronized(this) {
             if (out.isFile && out.length() > 0) { out.setLastModified(System.currentTimeMillis()); return out }
-            // Bound retained imports to the newest file; the editor owns one source.
-            dir.listFiles()?.filter { it != out }?.forEach { it.delete() }
+            // A library thumbnail may decode another RAW while the editor still
+            // owns its source path. Never evict that source during another read.
+            dir.listFiles()?.filter { it != out && it.absolutePath !in editorSources }?.forEach { it.delete() }
             val tmp = File.createTempFile(key.take(12), ".partial", dir)
             try {
                 val input = context.contentResolver.openInputStream(uri) ?: error("无法读取文件")

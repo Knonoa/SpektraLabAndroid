@@ -1,5 +1,8 @@
 package com.spektralab.android.ui
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+
 import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -56,6 +59,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -63,6 +67,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -83,7 +90,7 @@ import com.spektralab.android.UiMessage
 import com.spektralab.android.engine.Catalog
 
 @Composable
-fun EditorScreen(vm: EditorViewModel, onCamera: () -> Unit = {}) {
+fun EditorScreen(vm: EditorViewModel, onCamera: () -> Unit = {}, onTether: () -> Unit = {}) {
     val context = LocalContext.current
     val state by vm.state.collectAsState()
     val catalog by vm.catalog.collectAsState()
@@ -91,12 +98,18 @@ fun EditorScreen(vm: EditorViewModel, onCamera: () -> Unit = {}) {
     val result by vm.result.collectAsState()
     val rendering by vm.rendering.collectAsState()
     val exporting by vm.exporting.collectAsState()
+    val fullSizeEnabled by vm.fullSizeEnabled.collectAsState()
+    val exportStage by vm.exportStage.collectAsState()
     val loading by vm.loadingPhoto.collectAsState()
     val engineError by vm.engineError.collectAsState()
     val engineReady by vm.engineReady.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     var showExport by rememberSaveable { mutableStateOf(false) }
     var showAbout by rememberSaveable { mutableStateOf(false) }
+    var showRecipes by rememberSaveable { mutableStateOf(false) }
+    var savedItem by remember { mutableStateOf<com.spektralab.android.MediaItem?>(null) }
+    val library = remember(context) { com.spektralab.android.MediaLibrary.get(context) }
+    val scope = rememberCoroutineScope()
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.loadPhoto(uri)
@@ -128,23 +141,13 @@ fun EditorScreen(vm: EditorViewModel, onCamera: () -> Unit = {}) {
                         "已保存到 相册 › Pictures/SpektraLab", actionLabel = "查看",
                         withDismissAction = true, duration = SnackbarDuration.Long,
                     )
-                    if (r == SnackbarResult.ActionPerformed) openImage(context, m.uri)
+                    if (r == SnackbarResult.ActionPerformed) savedItem = library.items.value.firstOrNull { it.uri == m.uri.toString() }
                 }
             }
         }
     }
 
-    val actions = remember(vm) {
-        object : EditorActions {
-            override fun update(interactive: Boolean, transform: (EditState) -> EditState) = vm.update(interactive, transform)
-            override fun commit() = vm.commit()
-            override fun selectFilm(stock: String) = vm.selectFilm(stock)
-            override fun selectPaper(stock: String) = vm.selectPaper(stock)
-            override fun selectScanFilm() = vm.selectScanFilm()
-            override fun resetAdjustments() = vm.resetAdjustments()
-            override fun newFilmEdgeBody() = vm.newFilmEdgeBody()
-        }
-    }
+    val actions = rememberEditorActions(vm)
 
     EditorContent(
         state = state,
@@ -159,21 +162,30 @@ fun EditorScreen(vm: EditorViewModel, onCamera: () -> Unit = {}) {
         actions = actions,
         onPick = pick,
         onCamera = onCamera,
+        onTether = onTether,
         onExport = { showExport = true },
         onCancelExport = vm::cancelExport,
         onAbout = { showAbout = true },
+        exportStage = exportStage,
+        onRecipes = { showRecipes = true },
     )
 
     if (showExport) {
         photo?.let { p ->
             ExportDialog(
                 fullWidth = p.fullWidth, fullHeight = p.fullHeight,
+                fullSizeEnabled = fullSizeEnabled, onFullSizeEnabled = vm::enableFullSize,
+                hasBorder = state.filmEdge.active,
                 onDismiss = { showExport = false },
                 onExport = { size -> showExport = false; startExport(size) },
             )
         }
     }
     if (showAbout) AboutDialog { showAbout = false }
+    if (showRecipes) RecipePicker(vm) { showRecipes = false }
+    savedItem?.let { item -> MediaDetail(item, { savedItem = null }, {
+        savedItem = null; vm.loadPhoto(Uri.parse(item.parentUri ?: item.uri), item.recipe)
+    }, { savedItem = null; scope.launch(Dispatchers.IO) { library.remove(item.id) } }) }
 }
 
 /** The stateless editor: everything it shows comes in as arguments. */
@@ -191,9 +203,12 @@ fun EditorContent(
     actions: EditorActions,
     onPick: () -> Unit,
     onCamera: () -> Unit,
+    onTether: () -> Unit,
     onExport: () -> Unit,
     onCancelExport: () -> Unit,
     onAbout: () -> Unit,
+    exportStage: String = "",
+    onRecipes: () -> Unit = {},
 ) {
     Box(Modifier.fillMaxSize().background(Palette.Background)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -202,7 +217,7 @@ fun EditorContent(
                 Box(m) {
                     when {
                         engineError != null -> CenterMessage("引擎初始化失败", engineError)
-                        photo == null -> EmptyState(loading = loading, onPick = onPick, onCamera = onCamera)
+                        photo == null -> EmptyState(loading = loading, onPick = onPick, onCamera = onCamera, onTether = onTether)
                         else -> PhotoViewer(
                             before = photo.preview,
                             after = result,
@@ -213,7 +228,7 @@ fun EditorContent(
                 }
             }
             val topBar: @Composable () -> Unit = {
-                TopBar(state, catalog, photo != null, exporting, onPick, onCamera, onExport, actions::resetAdjustments, onAbout)
+                TopBar(state, catalog, photo != null, exporting, onPick, onCamera, onTether, onExport, actions::resetAdjustments, onAbout, onRecipes)
             }
             if (landscape) {
                 Row(Modifier.fillMaxSize()) {
@@ -251,7 +266,7 @@ fun EditorContent(
             }
         }
 
-        if (exporting) ExportOverlay(onCancel = onCancelExport)
+        if (exporting) ExportOverlay(onCancel = onCancelExport, stage = exportStage)
 
         SnackbarHost(
             snackbar,
@@ -270,9 +285,11 @@ private fun TopBar(
     exporting: Boolean,
     onPick: () -> Unit,
     onCamera: () -> Unit,
+    onTether: () -> Unit,
     onExport: () -> Unit,
     onReset: () -> Unit,
     onAbout: () -> Unit,
+    onRecipes: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Row(
@@ -280,12 +297,11 @@ private fun TopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("SpektraLab", color = Palette.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("工作台", color = Palette.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             val film = catalog.film(state.filmStock)?.name ?: state.filmStock
-            val print = if (state.scanFilm) "直接扫描" else (catalog.paper(state.printStock)?.name ?: state.printStock)
             Text(
-                "$film  ›  $print",
-                color = Palette.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                film,
+                color = Palette.TextDim, fontSize = 11.sp,
             )
         }
         IconButton(onClick = onCamera) {
@@ -305,6 +321,8 @@ private fun TopBar(
                 Icon(Icons.Outlined.MoreVert, contentDescription = "更多", tint = Palette.Text)
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("胶片配方 · 保存 / 调用") }, onClick = { menu = false; onRecipes() }, enabled = !exporting)
+                DropdownMenuItem(text = { Text("连接 USB 相机") }, onClick = { menu = false; onTether() })
                 DropdownMenuItem(
                     text = { Text("恢复默认参数") },
                     leadingIcon = { Icon(Icons.Outlined.RestartAlt, null) },
@@ -321,7 +339,7 @@ private fun TopBar(
 }
 
 @Composable
-private fun EmptyState(loading: Boolean, onPick: () -> Unit, onCamera: () -> Unit) {
+private fun EmptyState(loading: Boolean, onPick: () -> Unit, onCamera: () -> Unit, onTether: () -> Unit) {
     Box(Modifier.fillMaxSize().background(Palette.Canvas), contentAlignment = Alignment.Center) {
         if (loading) {
             CircularProgressIndicator(color = Palette.Amber, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
@@ -329,8 +347,8 @@ private fun EmptyState(loading: Boolean, onPick: () -> Unit, onCamera: () -> Uni
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
-                    .clickable(onClick = onPick)
-                    .padding(32.dp),
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
             ) {
                 Box(
                     Modifier.size(72.dp).background(Palette.PanelRaised, RoundedCornerShape(20.dp)),
@@ -353,6 +371,7 @@ private fun EmptyState(loading: Boolean, onPick: () -> Unit, onCamera: () -> Uni
                     Spacer(Modifier.width(6.dp))
                     Text("拍摄", color = Palette.Text)
                 }
+                androidx.compose.material3.OutlinedButton(onClick = onTether) { Text("连接 USB 相机", color = Palette.Text) }
             }
         }
     }
@@ -372,7 +391,7 @@ private fun CenterMessage(title: String, detail: String) {
 }
 
 @Composable
-private fun ExportOverlay(onCancel: () -> Unit) {
+private fun ExportOverlay(onCancel: () -> Unit, stage: String) {
     Box(
         Modifier.fillMaxSize().background(Color(0xB3000000)).clickable(enabled = true, onClick = {}),
         contentAlignment = Alignment.Center,
@@ -381,14 +400,14 @@ private fun ExportOverlay(onCancel: () -> Unit) {
             Modifier.width(280.dp).background(Palette.PanelRaised, RoundedCornerShape(16.dp)).padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("正在以全分辨率冲印…", color = Palette.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(stage.ifBlank { "正在冲印" }, color = Palette.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(14.dp))
             LinearProgressIndicator(
                 color = Palette.Amber, trackColor = Palette.Hairline,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(6.dp))
-            Text("颗粒、光晕按原图像素重新计算，大图需要十几秒", color = Palette.TextFaint, fontSize = 11.sp)
+            Text("正在处理所选尺寸；大图可能需要较长时间", color = Palette.TextFaint, fontSize = 11.sp)
             Spacer(Modifier.height(10.dp))
             TextButton(onClick = onCancel) { Text("取消", color = Palette.Amber) }
         }
@@ -398,20 +417,30 @@ private fun ExportOverlay(onCancel: () -> Unit) {
 @Composable
 private fun ExportDialog(
     fullWidth: Int, fullHeight: Int,
+    fullSizeEnabled: Boolean, onFullSizeEnabled: (Boolean) -> Unit, hasBorder: Boolean,
     onDismiss: () -> Unit, onExport: (ExportSize) -> Unit,
 ) {
     val long = maxOf(fullWidth, fullHeight)
-    val options = ExportSize.entries
+    val options = ExportSize.entries.filter { fullSizeEnabled || it != ExportSize.ORIGINAL }
     // the smallest option that keeps the original size, else the largest
-    var selected by remember { mutableStateOf(options.firstOrNull { it.maxEdge >= long } ?: options.last()) }
+    var selected by remember { mutableStateOf(options.firstOrNull { it.maxEdge >= long && it != ExportSize.ORIGINAL } ?: ExportSize.S4096) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Palette.PanelRaised,
         title = { Text("导出 JPEG") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("原图 $fullWidth × $fullHeight", color = Palette.TextDim, fontSize = 12.sp)
                 Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("允许全尺寸处理", Modifier.weight(1f), fontSize = 14.sp)
+                    Switch(checked = fullSizeEnabled, onCheckedChange = {
+                        if (!it && selected == ExportSize.ORIGINAL) selected = ExportSize.S4096
+                        onFullSizeEnabled(it)
+                    })
+                }
+                Text("建议 16 GB 内存、64 位手机。导出前检查可用内存，不足时停止，不自动降尺寸。", fontSize = 11.sp, color = Palette.TextDim)
+                if (hasBorder) Text("完整尺寸模式保留构图，本次不应用胶片片边；日期后背仍可保留。", fontSize = 11.sp, color = Palette.Amber)
                 options.forEach { o ->
                     val edge = minOf(o.maxEdge, long)
                     val s = edge.toFloat() / long
@@ -427,10 +456,14 @@ private fun ExportDialog(
                             colors = RadioButtonDefaults.colors(selectedColor = Palette.Amber),
                         )
                         Column {
-                            Text("长边 ${o.label}", color = Palette.Text, fontSize = 14.sp)
+                            Text(if (o == ExportSize.ORIGINAL) "完整尺寸（不缩图、不裁切）" else "长边 ${o.label}", color = Palette.Text, fontSize = 14.sp)
                             Text(if (o.maxEdge >= long) "$dims（原尺寸）" else dims, color = Palette.TextFaint, fontSize = 11.sp)
                         }
                     }
+                }
+                if (selected == ExportSize.ORIGINAL) {
+                    val gb = com.spektralab.android.FullSizeExport.estimatedBytes(fullWidth,fullHeight,fullWidth,fullHeight)/1e9
+                    Text("预计峰值内存约 %.1f GB；输出 JPEG，无法恢复相机拍摄时已裁切的像素。".format(gb), fontSize=11.sp, color=Palette.TextDim)
                 }
                 HorizontalDivider(color = Palette.Hairline, modifier = Modifier.padding(vertical = 8.dp))
                 Text(

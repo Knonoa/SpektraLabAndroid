@@ -130,8 +130,7 @@ data class EditState(
         )
     }
 
-    fun save(prefs: SharedPreferences) {
-        val o = JSONObject()
+    fun toJson(): JSONObject = JSONObject()
             .put("filmStock", filmStock).put("printStock", printStock).put("scanFilm", scanFilm)
             .put("autoExposure", autoExposure).put("exposureEv", exposureEv.toDouble())
             .put("format", format.name)
@@ -145,7 +144,8 @@ data class EditState(
             .put("sharpen", sharpen)
             .put("filmEdge", filmEdge.toJson())
             .put("dateBack", dateBack.toJson())
-        prefs.edit().putString(KEY, o.toString()).apply()
+    fun save(prefs: SharedPreferences) {
+        prefs.edit().putString(KEY, toJson().toString()).apply()
     }
 
     companion object {
@@ -163,8 +163,10 @@ data class EditState(
 
         fun load(prefs: SharedPreferences): EditState {
             val s = prefs.getString(KEY, null) ?: return EditState()
-            return runCatching {
-                val o = JSONObject(s)
+            return runCatching { fromJson(JSONObject(s)) }.getOrDefault(EditState())
+        }
+
+        fun fromJson(o: JSONObject): EditState = runCatching {
                 val d = EditState()
                 fun f(k: String, def: Float) = o.optDouble(k, def.toDouble()).toFloat()
                 EditState(
@@ -192,6 +194,5 @@ data class EditState(
                     dateBack = DateBackSettings.fromJson(o.optJSONObject("dateBack")),
                 )
             }.getOrDefault(EditState())
-        }
     }
 }

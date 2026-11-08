@@ -6,15 +6,19 @@
 
 **[下载最新 APK](https://github.com/Knonoa/SpektraLabAndroid/releases/latest)** · [1.2 发布说明](SpektraDroid/docs/releases/1.2.md) · [RAW 实测记录](SpektraDroid/docs/RAW_VALIDATION.md)
 
+以下新增功能在 [`dev` 分支](https://github.com/Knonoa/SpektraLabAndroid/tree/dev)维护，**尚未包含在已发布的 1.2 APK**。见 [索尼 USB 连接说明](SpektraDroid/docs/SONY_USB.md)、[新增实测记录](SpektraDroid/docs/USB_FULL_RAW_VALIDATION.md) 和 [页面评估与待修问题](SpektraDroid/docs/UI_AUDIT.md)。
+
 ## 功能
 
+- **三种工作模式（开发中）**：工作台导入冲印、手机相机拍摄、USB监视器。应用内素材库支持搜索、来源与类型筛选、照片 / RAW回看及视频播放；命名配方可在三种模式调用。工作台保留自身调色，相机和监视器共享拍摄调色。见 [工作站验证](SpektraDroid/docs/WORKSTATION_VALIDATION.md)。
 - **胶片与相纸模拟**：25 款胶片、9 款相纸，曝光、放大机、颗粒、光晕、散射、显影成色剂和扫描锐化。Kotlin / Jetpack Compose 编辑器，C++20 本机处理引擎。
 - **胶片边框 Film Edge**：135、半格、XPan、120 等画幅，片门、齿孔、胶片型号、帧号、片边雾化和漏光。边框作为底片曝光的一部分参与显影。
 - **日期后背 Date Back**：液晶或点阵日期，以及 EXIF 中可用的快门、光圈、曝光补偿等拍摄数据。胶片型号印在片边。
 - **拍摄页面**：CameraX 取景、实时胶片预览、闪光灯和变焦；查看系统公开的逻辑/物理摄像头及其参数，并在设备允许时指定物理镜头。
 - **复用手机成像能力**：优先使用厂商公开的 CameraX 扩展；部分设备可走 Camera2 HAL HDR 场景模式。「系统相机」按钮调用手机自带相机，再导入回传照片。可用模式取决于设备及系统相机的回传能力。
 - **RAW 与 TIFF 导入**：DNG、索尼 ARW、尼康 NEF、佳能 CR2/CR3、经典 TIFF/TIF，以及普通图像。原生线性浮点图像送入胶片引擎，RAW 计算输入不经过 8 位显示位图。
-- **编辑与导出**：640/1600 像素渐进预览、缩放和分屏对比、设置自动保存、可取消的 JPEG 导出。保存到 `Pictures/SpektraLab`，可选输出尺寸，源图长边最高 4096 像素；加入片边后的最终画布可能更大。
+- **索尼 USB 联机（开发中）**：USB/OTG 的 PC 遥控连接、自动接收照片原文件、480p/720p 上限实时监看、胶片色调预览、可选相机参数叠加的无声 H.264 MP4 录制。参考 libgphoto2 的索尼协议；实体相机兼容性待验证。
+- **编辑与导出**：640/1600 像素渐进预览、缩放和分屏对比、设置自动保存、可取消的 JPEG 导出。保存到 `Pictures/SpektraLab`，普通输出源图长边最高 4096 像素；新增完整尺寸开关，在检查可用内存后保留 RAW 解码尺寸，本次禁用胶片片边以保留构图。全尺寸处理需要 64 位设备和较多空闲内存，JPEG 仍为 8 位。普通模式加入片边后的最终画布可能更大。
 
 ## 安装
 
@@ -29,8 +33,9 @@
 1. 选择照片，或从相册分享/打开到本应用。部分文件提供器把 RAW 归类为通用二进制文件，选择器也允许这种类型。
 2. 选择胶片、相纸，调整曝光、放大机和效果。长按查看原图，也可使用分屏对比。
 3. 在「片边」页开启胶片边框和日期打印。启用边框后，照片会居中裁成所选片门比例。
-4. 进入「拍摄」页拍照，可开启胶片预览；需要手机自带相机的模式时使用「系统相机」。拍摄完成后回到编辑器。
-5. 导出 JPEG 到系统相册。
+4. 进入「拍摄」页拍照，可开启胶片预览；需要手机自带相机的模式时使用「系统相机」。开发版拍摄后留在相机素材栏，可直接回看或进入工作台。
+5. 联机索尼时打开「连接 USB 相机」，将相机设为 USB PC 遥控，允许手机访问。见 [连接说明](SpektraDroid/docs/SONY_USB.md)。
+6. 导出 JPEG 到系统相册。开启「允许全尺寸处理」后选择「完整尺寸」，不缩图、不用片边裁切；无法恢复相机拍摄时就已丢弃的像素。
 
 ## RAW 实测与限制
 
@@ -49,7 +54,7 @@
 
 这 9 款相机的 10 份样片全部通过，另有 5 份 ARW/NEF/CR2/CR3/DNG 回归样片通过。调试版测试共 **10 项，零失败、零跳过**。模式、尺寸、耗时与校验值见 [RAW_VALIDATION.md](SpektraDroid/docs/RAW_VALIDATION.md) 和 [raw-fixtures.json](SpektraDroid/docs/raw-fixtures.json)；发布包验证见 [1.2 发布说明](SpektraDroid/docs/releases/1.2.md)。
 
-- 这些样片不代表所有 RAW 压缩、裁切、连拍和方向组合都已覆盖。尚未逐机验证原始全分辨率或 4096 像素 RAW 胶片导出，也不能将模拟器耗时当作手机性能。
+- 这些样片不代表所有 RAW 压缩、裁切、连拍和方向组合都已覆盖。另外九款索尼 24–61MP 完整尺寸样片已通过高内存模拟器的完整解码、默认胶片处理和 JPEG 尺寸验证，见 [新增结果](SpektraDroid/docs/USB_FULL_RAW_VALIDATION.md)。其他模式和手机性能仍需验证。
 - 为支持新索尼格式和尼康 HE/HE*，固定使用 LibRaw 官方开发快照 `0.23.0-Snapshot202611`，并非 LibRaw 稳定发布版。
 - RAW 先用 LibRaw 输出 **16 位线性 compatible 图像**，之后缩图、颜色转换、胶片处理采用 float32；去马赛克仍有整数计算，该策略本身也有高光裁切。显示与 JPEG 导出为 8 位 sRGB，尚无 16 位 TIFF 导出。
 - 大 RAW 仍需较多内存。本轮 A7R VI 全画幅样片曾触发内存不足，已通过提早释放解码缓冲、再生成所需尺寸浮点图修复；低内存设备仍需单独验证。
@@ -96,6 +101,7 @@ bash tools/setup_libraw.sh
 - [spektrafilm](https://github.com/andreavolpato/spektrafilm)，Andrea Volpato：胶片过程模型、实测彩色胶片数据和参考实现；新增黑白胶片数据：Hanze Qiu。
 - [SpektraLab](https://github.com/JamesQiu2005/SpektraLab)：原生参考引擎、Film Edge 与 Date Back；[Knonoa/SpektraLabAndroid](https://github.com/Knonoa/SpektraLabAndroid)：安卓移植。
 - 应用与引擎：**GPL-3.0-or-later**，见 [LICENSE.txt](LICENSE.txt)；胶片、相纸和派生 LUT 数据：**CC BY-SA 4.0**，另见[上游数据声明](license/SPEKTRAFILM_LICENSE.txt)。
+- [libgphoto2](https://github.com/gphoto/libgphoto2)：索尼协议参考，源码文件头许可为 LGPL-2.0-or-later；见 [参考与署名](SpektraDroid/docs/SONY_USB.md)。
 - [LibRaw](https://github.com/LibRaw/LibRaw)：LGPL-2.1 或 CDDL，本发行选择 LGPL-2.1；TeX Gyre Heros：GUST Font License；DejaVu：附带字体许可；stb：公有领域 / MIT；AndroidX：Apache-2.0。相关声明和许可文本保存在 APK assets 与源码中。
 
 本项目为**非官方安卓移植**，不代表上游作者背书。SpektraLab 名称与图标另受上游商标条款约束，源码和数据许可不授予商标权；再次发行衍生应用前，请查阅[上游商标说明](https://github.com/JamesQiu2005/SpektraLab#trademark)。

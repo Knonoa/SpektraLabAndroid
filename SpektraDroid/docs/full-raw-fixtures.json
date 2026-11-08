@@ -1,0 +1,93 @@
+[
+  {
+    "filename": "full-ILCE-7RM5.ARW",
+    "model": "ILCE-7RM5",
+    "mode": "14bit 14bit compressed (3:2)",
+    "notes": "taken in daylight",
+    "url": "https://raw.pixls.us/getfile.php/6235/nice/Sony - ILCE-7RM5 - 14bit 14bit compressed (3:2).ARW",
+    "sha256": "92d962578abe59f686ae57016e87d5f81e03f17404bd1959aa9628bd5a52ca91",
+    "license": "CC0-1.0",
+    "bytes": 72286208
+  },
+  {
+    "filename": "full-ILCE-7RM4.ARW",
+    "model": "ILCE-7RM4",
+    "mode": "14bit 14bit compressed (3:2)",
+    "notes": "",
+    "url": "https://raw.pixls.us/getfile.php/3480/nice/Sony - ILCE-7RM4 - 14bit 14bit compressed (3:2).ARW",
+    "sha256": "e6dafe42643f69ab9d1fd00414b7a1f5104df354bb589201600ac934b29b5e4a",
+    "license": "CC0-1.0",
+    "bytes": 61983744
+  },
+  {
+    "filename": "full-ILCE-7RM3.ARW",
+    "model": "ILCE-7RM3",
+    "mode": "14bit 14bit compressed (3:2)",
+    "notes": "",
+    "url": "https://raw.pixls.us/getfile.php/2045/nice/Sony - ILCE-7RM3 - 14bit 14bit compressed (3:2).ARW",
+    "sha256": "a7b0279a11b36055fca1fd598be9f708b2f9d89b0d30178fd81d1d594547fc7a",
+    "license": "CC0-1.0",
+    "bytes": 43002368
+  },
+  {
+    "filename": "full-ILCE-7M3.ARW",
+    "model": "ILCE-7M3",
+    "mode": "14bit 14bit compressed (3:2)",
+    "notes": "",
+    "url": "https://raw.pixls.us/getfile.php/2414/nice/Sony - ILCE-7M3 - 14bit 14bit compressed (3:2).ARW",
+    "sha256": "250784580ea527442c09004417bb0eead484f2bf3ee8f9121a776ac65bb50d0f",
+    "license": "CC0-1.0",
+    "bytes": 25639680
+  },
+  {
+    "filename": "full-ILCE-7M4.ARW",
+    "model": "ILCE-7M4",
+    "mode": "14bit (3:2)",
+    "notes": "FullFrame \"raw compressed\" (lossy)",
+    "url": "https://raw.pixls.us/getfile.php/6932/nice/Sony - ILCE-7M4 - 14bit (3:2).ARW",
+    "sha256": "73c79fd9fbd73dff89548b611aaedc3c5a7e3412ec190c23881ea8434ff2214c",
+    "license": "CC0-1.0",
+    "bytes": 40665088
+  },
+  {
+    "filename": "full-ILCE-7M5.ARW",
+    "model": "ILCE-7M5",
+    "mode": "14bit (3:2)",
+    "notes": "full frame compressed hq",
+    "url": "https://raw.pixls.us/getfile.php/8846/nice/Sony - ILCE-7M5 - 14bit (3:2).ARW",
+    "sha256": "4e3a99cbcf2a348decaf3ca68c5de22b7a05eaa590f4e9184735c1f9c45213a7",
+    "license": "CC0-1.0",
+    "bytes": 23232512
+  },
+  {
+    "filename": "full-ILCE-1M2.ARW",
+    "model": "ILCE-1M2",
+    "mode": "14bit Lossy (3:2)",
+    "notes": "Lossy compressed full-frame",
+    "url": "https://raw.pixls.us/getfile.php/7831/nice/Sony - ILCE-1M2 - 14bit Lossy (3:2).ARW",
+    "sha256": "bfe5113d3a6bc237ed0852a23d99da1c9733eb3f63056e362f40450fdd9644f8",
+    "license": "CC0-1.0",
+    "bytes": 53440512
+  },
+  {
+    "filename": "full-ILCE-6700.ARW",
+    "model": "ILCE-6700",
+    "mode": "14bit (3:2)",
+    "notes": "compressed raw",
+    "url": "https://raw.pixls.us/getfile.php/6735/nice/Sony - ILCE-6700 - 14bit (3:2).ARW",
+    "sha256": "501666fd94cbc28176e9c03a40c1d8121319df6542bfcbef0ffcfebeb04a32bf",
+    "license": "CC0-1.0",
+    "bytes": 34148352
+  },
+  {
+    "filename": "full-ILCE-1.ARW",
+    "make": "Sony",
+    "model": "ILCE-1",
+    "mode": "14bit 14bit compressed (3:2)",
+    "notes": "AF-S mode, Aperture priority at f/8. Compressed raw full frame. In camera +1 exposure.",
+    "url": "https://raw.pixls.us/getfile.php/4465/nice/Sony - ILCE-1 - 14bit 14bit compressed (3:2).ARW",
+    "license": "CC0-1.0",
+    "bytes": 63216896,
+    "sha256": "ddb72880da333b46a4c13286f78473dacc11377ea874bc3656e64e30a8122a88"
+  }
+]

@@ -97,7 +97,7 @@ def main() -> int:
 
     h, w = args.height, args.height + 100
     img = frame(h, w)
-    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektrafilm_engine.dylib'}")
+    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektralab_engine.dylib'}")
     print(f"frame {w}x{h}: the live tier is 1600 px, so no tier downscales and the "
           f"strips cut the frame's own rows\n")
 

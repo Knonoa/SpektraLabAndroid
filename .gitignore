@@ -279,7 +279,7 @@ engine/build/
 # from a checkout that has the Python reference tree — then commit the result.
 # See README "Rebaking the engine resources".
 #
-# `engine/resources/spektrafilm.metallib` is the one file in there that stays
+# `engine/resources/spektralab.metallib` is the one file in there that stays
 # ignored: `*.metallib` above catches it, and that is the right answer. It is
 # compiled from `engine/src/shaders/*.metal` by `engine/build.sh` on every
 # build, with the two math flags (RFC-014 §5.1 trap 1) kept next to the reason
@@ -380,3 +380,6 @@ You_Still_Fucked_Film_Simulation/
 *.jks
 signing.properties
 key.properties
+
+# Native Metal pipelines are built for the build host; portable IR remains bundled.
+*.metalar

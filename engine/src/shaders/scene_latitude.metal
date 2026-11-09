@@ -83,3 +83,61 @@ kernel void spk_scene_latitude(device const float* rgb [[buffer(0)]],
     out[3u * i + 1u] = g * k;
     out[3u * i + 2u] = b * k;
 }
+
+// The Decode curve (API-SPEC §17): the person's tone curve on the scene, on
+// this file's stop axis. Like Scene Latitude it is a gain on the linear
+// signal: each value's stops about mid-grey, E = log2(v / n_ref), are read
+// through a table over [-S, +S] and the value is scaled by 2^(f(E) - E).
+// Past the table's ends the end's own gain holds, so the curve never folds a
+// value back. A value that is not positive and finite passes as it came.
+//
+// Luma first, as a gain on Y (the hue kept); then the rgb row on each
+// channel; then each channel's own row -- the Layer 2 pass's order.
+//
+// RFC-035 §5.3: the table's axis is the scene **as exposed onto the film**.
+// This node runs before `node_exposure`'s 2^c (c = Film Exposure), so it reads
+// the table at E + c and applies 2^(f(E + c) - (E + c)); the film then gets
+// 2^c on top, and its exposure is exactly f(E + c) -- the curve after Film
+// Exposure, with no reorder across the spectral upsample (which a per-channel
+// gain does not commute with). With c = 0 this is the kernel as it was.
+//
+// `p`: 0 n (samples a row)  1 S (stops either side)  2 n_ref  3..5 the Y row
+// of the working space's RGB -> XYZ  6 c, Film Exposure in stops. `t`: five
+// rows of n, rgb luma r g b.
+inline float scene_curve_gain(float v, device const float* t, uint row, uint n, float S, float n_ref, float c) {
+    if (!(v > 0.0f) || !isfinite(v)) return 1.0f;
+    float E = log2(v / n_ref) + c;
+    float u = clamp((E + S) / (2.0f * S), 0.0f, 1.0f);
+    float x = u * float(n - 1u);
+    uint i = min(uint(x), n - 2u);
+    float f = x - float(i);
+    device const float* r = t + row * n;
+    float y = mix(r[i], r[i + 1u], f);
+    // At the clamp, u is the end's: the gain there is held beyond it.
+    float d = 2.0f * S * (y - u);
+    return clamp(exp2(d), exp2(-30.0f), exp2(30.0f));
+}
+
+kernel void spk_scene_curve(device const float* rgb [[buffer(0)]],
+                            device const float* p [[buffer(1)]],
+                            device const float* t [[buffer(2)]],
+                            device const uint* count [[buffer(3)]],
+                            device float* out [[buffer(4)]],
+                            uint3 thread_position_in_grid [[thread_position_in_grid]]) {
+    uint i = thread_position_in_grid.x;
+    if (i >= count[0]) return;
+    uint n = uint(p[0]);
+    float S = p[1], n_ref = p[2], ec = p[6];
+    float3 c = float3(rgb[3u * i], rgb[3u * i + 1u], rgb[3u * i + 2u]);
+    float y = p[3] * max(c.r, 0.0f) + p[4] * max(c.g, 0.0f) + p[5] * max(c.b, 0.0f);
+    c *= scene_curve_gain(y, t, 1u, n, S, n_ref, ec);
+    c = float3(c.r * scene_curve_gain(c.r, t, 0u, n, S, n_ref, ec),
+               c.g * scene_curve_gain(c.g, t, 0u, n, S, n_ref, ec),
+               c.b * scene_curve_gain(c.b, t, 0u, n, S, n_ref, ec));
+    c = float3(c.r * scene_curve_gain(c.r, t, 2u, n, S, n_ref, ec),
+               c.g * scene_curve_gain(c.g, t, 3u, n, S, n_ref, ec),
+               c.b * scene_curve_gain(c.b, t, 4u, n, S, n_ref, ec));
+    out[3u * i] = c.r;
+    out[3u * i + 1u] = c.g;
+    out[3u * i + 2u] = c.b;
+}

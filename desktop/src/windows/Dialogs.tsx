@@ -220,7 +220,7 @@ export function AboutDialog() {
     <Frame open={open} onClose={() => setPages({ aboutOpen: false })} title="SpektraLab" testId="about">
       <div className="dialog-body">
         <p>
-          {tz('Version', '版本')} {paths?.version ?? '1.3.1'} — {tz('film and print emulation built on the spektrafilm engine.', '基于 spektrafilm 引擎的胶片与相纸模拟。')}
+          {tz('Version', '版本')} {paths?.version ?? '1.3.1'} — {tz('film and print emulation built on the SpektraLab engine, derived from spektrafilm by Andrea Volpato.', '基于 SpektraLab 引擎的胶片与相纸模拟；该引擎派生自 Andrea Volpato 的 spektrafilm。')}
         </p>
         <p className="caption">
           {tz(

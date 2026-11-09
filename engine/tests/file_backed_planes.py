@@ -123,7 +123,7 @@ def main() -> int:
 
     h, w = (int(v) for v in args.size.split("x"))
     plane_mb = h * w * 3 * 4 / MB
-    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektrafilm_engine.dylib'}")
+    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektralab_engine.dylib'}")
     print(f"frame:  {w}x{h} = {w * h / 1e6:.1f} MP, one plane {plane_mb:,.0f} MB")
 
     failures = 0
@@ -175,13 +175,13 @@ def main() -> int:
               f"{planes_charge / plane_mb:.2f} planes for a source and a negative")
 
         # --- the branch with no plane file to be had ----------------------
-        # `SPEKTRAFILM_PLANE_DIR` is a seam (metal_gpu.cpp) that points the
+        # `SPEKTRALAB_PLANE_DIR` is a seam (metal_gpu.cpp) that points the
         # planes somewhere impossible. The engine must still open, render and
         # produce the same picture -- this is an optimisation, and an open
         # that fails for it would be the optimisation breaking the product --
         # and the report must say the planes are *not* file-backed, so a
         # silent fallback cannot pass for a win.
-        os.environ["SPEKTRAFILM_PLANE_DIR"] = "/nonexistent/spektrafilm-planes"
+        os.environ["SPEKTRALAB_PLANE_DIR"] = "/nonexistent/spektralab-planes"
         session, _ms = open_timed(engine, pixels)
         rendered, _res = session.render("live")
         fell_back = None
@@ -197,7 +197,7 @@ def main() -> int:
             check(fell_back == 0,
                   "and says so: nothing claims to be file-backed",
                   f"file_backed_bytes = {fell_back}")
-        del os.environ["SPEKTRAFILM_PLANE_DIR"]
+        del os.environ["SPEKTRALAB_PLANE_DIR"]
 
         # ... and the seam is not sticky: the next open is file-backed again.
         session, _ms = open_timed(engine, pixels)

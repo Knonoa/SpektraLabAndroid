@@ -227,7 +227,7 @@ bool Pipeline::prepare_contrast_mask(const Image& cmy, std::string& error,
     // The self-guided base is research-only (RFC-024 §12.4, the user's
     // decision of 2026-09-24): at its fixed threshold it counted building
     // texture as edge and greyed the print like the per-pixel arm.
-    if (std::getenv("SPEKTRAFILM_MASK_GUIDED")) {
+    if (std::getenv("SPEKTRALAB_MASK_GUIDED")) {
         // He, Sun & Tang's guided filter, self-guided, on the grid. Two box
         // passes of radius r have a standard deviation of ~0.816 r, so r is
         // chosen to match the Gaussian's sigma at the same `scale`.
@@ -251,7 +251,7 @@ bool Pipeline::prepare_contrast_mask(const Image& cmy, std::string& error,
     // RFC-024 §9.1's pointwise comparator, for research only: `a = 1, b = 0`
     // makes the base every pixel's own `x`, i.e. the same curve with no
     // spatial structure. Not on the wire and not a product mode.
-    if (std::getenv("SPEKTRAFILM_MASK_POINTWISE")) {
+    if (std::getenv("SPEKTRALAB_MASK_POINTWISE")) {
         std::fill(a.begin(), a.end(), 1.0);
         b.assign(x.size(), 0.0);
     }
@@ -280,7 +280,7 @@ bool Pipeline::prepare_contrast_mask(const Image& cmy, std::string& error,
 
     // A research instrument, off unless asked for: the grid's `x`, the base at
     // the grid's own `x`, and the delta there, as three float32 planes.
-    if (const char* dump = std::getenv("SPEKTRAFILM_MASK_DUMP")) {
+    if (const char* dump = std::getenv("SPEKTRALAB_MASK_DUMP")) {
         if (FILE* f = std::fopen(dump, "wb")) {
             const uint32_t dims[2] = {gw, gh};
             std::fwrite(dims, sizeof dims, 1, f);

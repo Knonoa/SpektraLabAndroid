@@ -91,10 +91,19 @@ build_metallib() {
   done
   shopt -u nullglob
   if [[ ${#airs[@]} -eq 0 ]]; then echo "no shaders yet"; return 0; fi
-  xcrun -sdk macosx metallib "${airs[@]}" -o "$out/spektrafilm.metallib"
-  check_metallib_target "$out/spektrafilm.metallib"
-  cp "$out/spektrafilm.metallib" "$here/resources/spektrafilm.metallib"
-  echo "metallib   -> $here/resources/spektrafilm.metallib"
+  xcrun -sdk macosx metallib "${airs[@]}" -o "$out/spektralab.metallib"
+  check_metallib_target "$out/spektralab.metallib"
+  cp "$out/spektralab.metallib" "$here/resources/spektralab.metallib"
+  "$here/tools/build_metal_archive.sh" "$out/spektralab.metallib" "$here/resources/spektralab.metalar" "$out"
+  echo "metallib   -> $here/resources/spektralab.metallib"
+}
+
+# Explicit offline regeneration only: ordinary builds ship the tracked tables.
+build_cam16() {
+  "$CXX" "${cxxflags[@]}" "${includes[@]}" "$here/tools/bake_cam16.cpp" \
+    "$here/src/core/cam16.cpp" "$here/src/core/colour.cpp" \
+    "$here/src/core/blob.cpp" "$here/src/core/numeric.cpp" -o "$out/bake_cam16"
+  "$out/bake_cam16" "$here/resources" "$here/resources/cam16"
 }
 
 objects=()
@@ -111,21 +120,21 @@ build_objects() {
 
 build_lib() {
   build_objects
-  ar rcs "$out/libspektrafilm_engine.a" "${objects[@]}"
-  echo "static lib -> $out/libspektrafilm_engine.a"
+  ar rcs "$out/libspektralab_engine.a" "${objects[@]}"
+  echo "static lib -> $out/libspektralab_engine.a"
 }
 
 build_dylib() {
   build_objects
-  "$CXX" -dynamiclib -install_name @rpath/libspektrafilm_engine.dylib \
-    "${objects[@]}" "${frameworks[@]}" -o "$out/libspektrafilm_engine.dylib"
-  echo "dylib      -> $out/libspektrafilm_engine.dylib"
+  "$CXX" -dynamiclib -install_name @rpath/libspektralab_engine.dylib \
+    "${objects[@]}" "${frameworks[@]}" -o "$out/libspektralab_engine.dylib"
+  echo "dylib      -> $out/libspektralab_engine.dylib"
 }
 
 build_tests() {
   collect_sources
   local driver
-  for driver in dump_setup dump_json gpu_smoke; do
+  for driver in dump_setup dump_json gpu_smoke cam16_bake_checks fusion_checks device_lifetime_checks; do
     [[ -f "$here/tests/$driver.cpp" ]] || continue
     "$CXX" "${cxxflags[@]}" "${includes[@]}" -I"$here/tests" \
       "$here/tests/$driver.cpp" "${sources[@]}" "${frameworks[@]}" -o "$out/$driver"
@@ -144,7 +153,7 @@ build_tests() {
 # here keeps the math flags in one place, next to the reason for them.
 bundle_resources() {
   local app="$here/../modern_UI/Spektrafilm/Spektrafilm/Resources/engine"
-  if [[ ! -f "$here/resources/spektrafilm_constants.bin" ]]; then
+  if [[ ! -f "$here/resources/spektralab_constants.bin" ]]; then
     # `engine/resources/` is *tracked* in this repository, so this means the
     # checkout is damaged -- not that anything needs baking. Re-baking needs the
     # Python reference tree, which is deliberately not here; see README,
@@ -170,10 +179,11 @@ bundle_resources() {
 
 case "${1:-all}" in
   metallib) build_metallib ;;
+  cam16)    build_cam16 ;;
   lib)      build_metallib; build_lib ;;
   dylib)    build_metallib; build_dylib ;;
   tests)    build_tests ;;
   bundle)   build_metallib; bundle_resources ;;
   all)      build_metallib; build_lib; build_dylib; build_tests; bundle_resources ;;
-  *) echo "usage: build.sh [all|lib|dylib|tests|metallib|bundle]" >&2; exit 2 ;;
+  *) echo "usage: build.sh [all|lib|dylib|tests|metallib|cam16|bundle]" >&2; exit 2 ;;
 esac

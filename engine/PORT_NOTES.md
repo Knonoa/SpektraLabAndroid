@@ -42,7 +42,7 @@ verification of whatever Phase 2 left unverified. Then Phase 4 docs.
   the same 65535.
 - Vulkan backend: on a CPU device only, a start-up probe proves SSBOs past
   lavapipe's advertised 128 MiB work, then lifts the limit; stated in
-  math_mode. `SPEKTRAFILM_VULKAN_STRICT_LIMITS=1` turns it off.
+  math_mode. `SPEKTRALAB_VULKAN_STRICT_LIMITS=1` turns it off.
 
 - Phase 2: `engine/build-windows-cross.sh [--test]` (toolchain
   `engine/cmake/toolchain-mingw-w64.cmake`, posix-thread MinGW) stages

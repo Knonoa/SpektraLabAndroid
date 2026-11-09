@@ -27,16 +27,16 @@ class EngineSelectionTests(unittest.TestCase):
         checkout = self.root / name
         (checkout / "build").mkdir(parents=True)
         (checkout / "resources").mkdir()
-        library = checkout / "build" / "spektrafilm_engine.dll"
+        library = checkout / "build" / "spektralab_engine.dll"
         library.touch()
         return library, checkout / "resources"
 
     def test_platform_defaults_preserve_macos_and_name_windows_outputs(self):
         with mock.patch("sys.platform", "darwin"):
-            self.assertEqual(default_library(), ENGINE / "build" / "libspektrafilm_engine.dylib")
+            self.assertEqual(default_library(), ENGINE / "build" / "libspektralab_engine.dylib")
             self.assertEqual(default_binary("dump_setup"), ENGINE / "build" / "dump_setup")
         with mock.patch("sys.platform", "win32"):
-            self.assertEqual(default_library(), ENGINE / "build" / "spektrafilm_engine.dll")
+            self.assertEqual(default_library(), ENGINE / "build" / "spektralab_engine.dll")
             self.assertEqual(default_binary("dump_setup"), ENGINE / "build" / "dump_setup.exe")
 
     def test_environment_selects_a_library_and_its_worktree_resources(self):
@@ -57,7 +57,7 @@ class EngineSelectionTests(unittest.TestCase):
         self.assertEqual(resolve_resources(resources, library), resources.resolve())
 
     def test_external_build_without_resources_uses_checkout_data(self):
-        library = self.root / "external build" / "spektrafilm_engine.dll"
+        library = self.root / "external build" / "spektralab_engine.dll"
         self.assertEqual(resolve_resources(library=library), (ENGINE / "resources").resolve())
 
     def test_windows_cmake_resources_beside_dll_take_precedence(self):
@@ -65,7 +65,7 @@ class EngineSelectionTests(unittest.TestCase):
         engine = build / "engine"
         (engine / "resources").mkdir(parents=True)
         (build / "resources").mkdir()
-        library = engine / "spektrafilm_engine.dll"
+        library = engine / "spektralab_engine.dll"
         library.touch()
         os.environ[LIBRARY_ENV] = str(library)
         self.assertEqual(resolve_resources(), (engine / "resources").resolve())
@@ -73,7 +73,7 @@ class EngineSelectionTests(unittest.TestCase):
 
     def test_macos_keeps_build_sh_resource_layout_even_with_neighbor_directory(self):
         library, resources = self.make_checkout("macOS worktree")
-        library = library.with_name("libspektrafilm_engine.dylib")
+        library = library.with_name("libspektralab_engine.dylib")
         library.touch()
         (library.parent / "resources").mkdir()
         self.assertEqual(resolve_resources(library=library), resources.resolve())

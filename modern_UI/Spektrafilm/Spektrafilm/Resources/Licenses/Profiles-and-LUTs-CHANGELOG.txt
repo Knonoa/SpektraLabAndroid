@@ -21,7 +21,7 @@ this application edits them; `engine/tools/bake_resources.py` copies them and
 The 8 baked print-preview LUTs  --  DERIVED
 -------------------------------------------
 
-Inside `Resources/engine/spektrafilm_constants.bin`, as `print_lut/<stock>`
+Inside `Resources/engine/spektralab_constants.bin`, as `print_lut/<stock>`
 and `print_lut_axes/<stock>`: one 33x33x33x3 float32 table per print stock,
 plus its per-channel density axes.
 
@@ -50,7 +50,7 @@ from, as the share-alike condition requires.
 The constants that are not derived from the profiles
 ----------------------------------------------------
 
-The rest of `spektrafilm_constants.bin` -- the 1931 standard observer, the
+The rest of `spektralab_constants.bin` -- the 1931 standard observer, the
 illuminant SDs, the colourspace primaries and matrices, the CAT cone
 matrices, the Mallett basis, the Hanatos irradiance spectra, and the measured
 KG3 and lens filter curves -- is published colour-science data, not Andrea

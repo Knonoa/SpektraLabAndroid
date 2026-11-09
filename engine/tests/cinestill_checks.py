@@ -78,6 +78,8 @@ def main():
     with tempfile.TemporaryDirectory() as tmp, spk.Engine(dylib=a.dylib, resources=overlay(tmp)) as e:
         # 1. the alias renders, and is not its base: same film, different halo
         lamp = disc(np.full((H, W, 3), bg, np.float32), W // 2, H // 2, 1.5, 0.184 * 2 ** 3.5)
+        # beside the lamp, out over the ring (1-4 base thicknesses)
+        lamp_halo_probe = (slice(H // 2 - 20, H // 2 + 20), slice(W // 2 + int(D_PX), W // 2 + int(4 * D_PX)))
         cs = render(e, lamp, {"film_stock": "cinestill_800t"})
         v3 = render(e, lamp, {"film_stock": "kodak_vision3_500t"})
         far = (slice(0, 200), slice(0, 200))
@@ -126,16 +128,21 @@ def main():
             ratio = half[0] / half[1]
             check(1.49 <= ratio <= 2.65, f"at +{ev} EV the red halo reaches 1.49-2.65x as far as the green, as the scans do",
                   f"{half[0]:.1f} / {half[1]:.1f} px = {ratio:.2f}")
-        # 1.3.4 (the owner's decision): the model is CineStill's own. A film whose layer
-        # is switched off keeps 1.3.3's Gaussian halo -- it is not CineStill, and the
-        # headroom (back-reflection only) leaves it alone.
-        off_0 = render(e, lamp, {"film_stock": "kodak_vision3_500t", "antihalation_removed": True,
-                                 "halation_headroom_ev": 0.0})
-        off_8 = render(e, lamp, {"film_stock": "kodak_vision3_500t", "antihalation_removed": True,
-                                 "halation_headroom_ev": 8.0})
-        check(np.array_equal(off_0, off_8) and np.abs(off_0 - cs).max() > 10 / 255,
-              "a film with its layer switched off keeps 1.3.3's halo, not CineStill's",
-              f"headroom 0 vs 8 identical: {np.array_equal(off_0, off_8)}, against CineStill {np.abs(off_0 - cs).max() * 255:.1f}/255")
+        # 2.0 (the owner's decision): a film with its layer switched off has no layer, so it
+        # takes the same optics as CineStill. 500T without its layer *is* CineStill's
+        # emulsion and must render as it, byte for byte; a still film switched off must
+        # answer the headroom, which only the back-reflection model reads. (1.3.4, on
+        # release-1.3.4, pins the opposite: there the switch keeps 1.3.3's halo.)
+        same = render(e, lamp, {"film_stock": "kodak_vision3_500t", "antihalation_removed": True})
+        check(np.abs(same - cs).max() < 1e-9, "Vision3 500T with its layer switched off is CineStill 800T",
+              f"max diff {np.abs(same - cs).max() * 255:.3f}/255")
+        p_0 = render(e, lamp, {"film_stock": "kodak_portra_400", "antihalation_removed": True,
+                               "halation_headroom_ev": 0.0})
+        p_8 = render(e, lamp, {"film_stock": "kodak_portra_400", "antihalation_removed": True,
+                               "halation_headroom_ev": 8.0})
+        moved = (p_8 - p_0)[..., 0][lamp_halo_probe].mean() * 255
+        check(moved > 10, "a still film with its layer switched off takes the back-reflection halo (its headroom moves it)",
+              f"Portra 400, headroom 8 vs 0: +{moved:.1f}/255 red beside the lamp")
 
         # 4. the gate: a lamp at the frame's maximum, and a bright patch three stops under it
         #    that a night's auto-exposure could have put at +2.5 EV

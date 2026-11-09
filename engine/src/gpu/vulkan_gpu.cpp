@@ -105,7 +105,7 @@ struct ComputePipeline {
 class VulkanGpu final : public Gpu {
 public:
     explicit VulkanGpu(std::string shader_dir) : shader_dir_(std::move(shader_dir)) {
-        const char* timing = std::getenv("SPEKTRAFILM_TRANSFER_TIMINGS");
+        const char* timing = std::getenv("SPEKTRALAB_TRANSFER_TIMINGS");
         transfer_timings_ = timing && *timing && std::strcmp(timing, "0") != 0;
     }
 
@@ -161,14 +161,14 @@ public:
         result = vkEnumeratePhysicalDevices(instance_, &count, devices.data());
         if (result != VK_SUCCESS) { error = vk_error("vkEnumeratePhysicalDevices", result); return false; }
 
-        // SPEKTRAFILM_VULKAN_DEVICE=<index> pins one physical device (the
+        // SPEKTRALAB_VULKAN_DEVICE=<index> pins one physical device (the
         // host's --device flag sets it); otherwise a discrete GPU wins.
         int forced = -1;
-        if (const char* pick = std::getenv("SPEKTRAFILM_VULKAN_DEVICE"); pick && *pick) {
+        if (const char* pick = std::getenv("SPEKTRALAB_VULKAN_DEVICE"); pick && *pick) {
             char* end = nullptr;
             const long v = std::strtol(pick, &end, 10);
             if (end == pick || *end || v < 0 || v >= long(devices.size())) {
-                error = std::string("SPEKTRAFILM_VULKAN_DEVICE=") + pick + " is not a device index (0.." +
+                error = std::string("SPEKTRALAB_VULKAN_DEVICE=") + pick + " is not a device index (0.." +
                         std::to_string(devices.size() - 1) + ")";
                 return false;
             }
@@ -317,9 +317,9 @@ public:
     // 16 MiB past the advertised limit must read and write distinct values on
     // both sides of it. Only then is the limit raised to 4 GiB - 4, and the
     // math_mode string says so. Any GPU keeps its advertised limit, and
-    // SPEKTRAFILM_VULKAN_STRICT_LIMITS=1 keeps it here too.
+    // SPEKTRALAB_VULKAN_STRICT_LIMITS=1 keeps it here too.
     void probe_cpu_storage_range(std::string& detail) {
-        if (const char* strict = std::getenv("SPEKTRAFILM_VULKAN_STRICT_LIMITS"); strict && *strict == '1') return;
+        if (const char* strict = std::getenv("SPEKTRALAB_VULKAN_STRICT_LIMITS"); strict && *strict == '1') return;
         const VkDeviceSize advertised = properties_.limits.maxStorageBufferRange;
         if (advertised >= 0xFFFFFFF0ull) return;
         // spk_take_rgb over n RGBA pixels: it reads 16n bytes and writes 12n,

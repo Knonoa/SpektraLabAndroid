@@ -3,7 +3,7 @@
 #pragma once
 
 #include "io/raw_decoder.hpp"
-#include "spektrafilm/spk_engine.h"
+#include "spektralab/spk_engine.h"
 #include <cstdint>
 #include <filesystem>
 #include <memory>

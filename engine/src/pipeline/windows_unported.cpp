@@ -20,7 +20,7 @@ bool Pipeline::set_overscan_frame(uint32_t, uint32_t, std::string& error) {
     return false;
 }
 
-// Main added spk_overscan_geometry after the Windows port's root (61bfc49);
+// Main added spk_overscan_geometry after the Windows port's root (unpublished-revision);
 // the clean textual merge left this undefined and the non-Apple engine did
 // not link. Overscan is refused here, so there is never a layout to report.
 std::string Pipeline::overscan_geometry_json() const { return "{\"valid\":false}"; }

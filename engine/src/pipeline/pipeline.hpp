@@ -24,6 +24,8 @@
 // per-run argument, so the parameter works. That is a knowing divergence and
 // the render-parity harness reports it as one.
 #pragma once
+#include <array>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -99,7 +101,7 @@ struct Strip {
 //
 // With `detailed`, each node flushes before its timer stops, so the numbers
 // are real GPU time and the batching is given up for the run. Set
-// `SPEKTRAFILM_NODE_TIMINGS=1` to ask for it.
+// `SPEKTRALAB_NODE_TIMINGS=1` to ask for it.
 struct Progress {
     std::string progress_id;
     int total_nodes = 0;
@@ -208,6 +210,12 @@ struct Progress {
     // made smaller, which is what §4's striped mode is for -- so it is read,
     // reported by `spk_progress`, and no more.
     bool memory_pressure_critical = false;
+    // The render's time with the Mac awake (`elapsed_ms` counts sleep too),
+    // and what the GPU did for it (`Gpu::FrameStats`). Together they tell a
+    // render the system held up from one that was slow: a batch log had a
+    // 7 s render take 1,010 s and could say nothing more (2026-10-19).
+    double awake_ms = 0;
+    gpu::Gpu::FrameStats gpu;
 };
 
 // RFC-015 §2.3: what each of the four exposure intents would choose, all from
@@ -340,6 +348,13 @@ public:
 
     // `Tap.RGB_IN` -> `Tap.CMY_FILM`. `out` is the developed negative.
     bool run_film(const Image& in, Image& out, Progress* progress, std::string& error);
+    // Fixed cut immediately before grain; restored storage is moved into the
+    // chain, so the caller cannot accidentally retain it through downstream work.
+    bool run_film_checkpoint(const Image& in, Image& out, Image* restored,
+                             std::optional<double> cached_ev,
+                             const std::function<void(const Image&, double)>& observe,
+                             Progress* progress, std::string& error);
+
     // `Tap.CMY_FILM` -> `Tap.RGB_OUT`.
     bool run_print(const Image& cmy, Image& out, Progress* progress, std::string& error);
 
@@ -366,9 +381,12 @@ public:
     // node's norm relative to the metered mid-grey -- for every pixel of `in`
     // (the frame at the meter's resolution) after the node's upstream nodes
     // and the auto-exposure gain `ev`. Leaves the pipeline's pitch as it was,
-    // as `measure_meter_evs` does.
+    // as `measure_meter_evs` does. `channels`, when given, also gets each of
+    // R, G and B by itself in stops about the same mid-grey (RFC-035 §5.2),
+    // over the same pixels, each leaving out its own non-positive values.
     bool scene_latitude_sample(const Image& in, double ev, std::vector<double>& E,
-                               std::string& error, const double* region = nullptr);
+                               std::string& error, const double* region = nullptr,
+                               std::array<std::vector<double>, 3>* channels = nullptr);
 
     // The EV the auto-exposure node applies instead of metering its own
     // input. The session sets it before every film render, so every tier is
@@ -671,6 +689,11 @@ private:
     // before `node_upsample`, and not dispatched at all while it is off.
     bool scene_latitude_wanted() const;
     bool node_scene_latitude(const Image& in, Image& out, std::string& error);
+    // The Decode curve (`scene_latitude.cpp`, API-SPEC §17): pointwise, after
+    // Scene Latitude and before `node_upsample`, on the same stop axis; not
+    // dispatched while `camera.scene_curve` is "".
+    bool scene_curve_wanted() const;
+    bool node_scene_curve(const Image& in, Image& out, std::string& error);
 
     // RFC-024's virtual contrast mask (`contrast_mask.cpp`). `prepare` runs
     // once per print run on the whole negative, after `print_prefix`; the
@@ -686,6 +709,8 @@ private:
     bool node_digital_intermediate(const Image& in, Image& out, std::string& error);
     bool node_bw_correction(const Image& in, Image& out, std::string& error);
     bool node_glare(const Image& in, Image& out, std::string& error);
+    bool node_xyz_gamut(const Image& in, Image& out, std::string& error);
+    bool node_minilab(const Image& in, Image& out, std::string& error);
     bool node_xyz_to_rgb(const Image& in, Image& out, std::string& error);
     bool node_edr(const Image& in, Image& out, std::string& error);
     bool node_gamut_compress(const Image& in, Image& out, std::string& error);
@@ -717,6 +742,10 @@ private:
     // they are re-derived at the top of every `run_print`.
     bool refresh_print_constants(std::string& error);
 
+    gpu::BufferRef minilab_table_;
+    uint32_t minilab_side_ = 0;
+    float minilab_lo_[3]{}, minilab_inv_[3]{};
+    bool minilab_active_ = false;
     gpu::Gpu* gpu_;
     const Colour* colour_;
     const Blob* blob_;
@@ -745,6 +774,7 @@ private:
 
     // RFC-032 §27: kept across a reprint of the cached negative, which the
     // print side's no-film mask must match pixel for pixel.
+    Image factory_exposure_; // only alive from mark rasterization through film_blurs
     OverscanLayout overscan_;
     double frame_w_mm_ = 0.0, frame_h_mm_ = 0.0;
 

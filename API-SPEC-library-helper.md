@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | The binary is in the repository. The app does not launch it yet: this document is the contract the 2.0 library work builds against. |
-| **Binary** | `vendor/spklib/macos/spklib-host`, `spklib 0.1.0+f4de46cf119a (abi 1, schema 1)`. Its SHA-256 is in `spklib-host.sha256` beside it. |
+| **Status** | The binary is in the repository, and the 2.0 app embeds and launches it (§9). This document is the contract the 2.0 library work builds against. |
+| **Binary** | `vendor/spklib/macos/spklib-host`, `spklib 0.3.1+f236e03b4c8e (abi 1, schema 3)`, built by `./build.sh release` from the public tag [`v0.3.1`](https://github.com/JamesQiu2005/SpektraLab_library/releases/tag/v0.3.1). SHA-256 `9e14546ff99ee3d956a20a9d235c013b1b852a29aae03ace8be0231d3a0ea9d7`, also in `spklib-host.sha256` beside it. |
 | **Platform** | Universal (arm64 + x86_64), macOS 13.0 or later (the app needs 15.0). Stripped, ad-hoc signed. |
-| **Source** | [JamesQiu2005/SpektraLab_library](https://github.com/JamesQiu2005/SpektraLab_library). Built there by `./build.sh release`, at the commit named in its version. |
+| **Source** | [JamesQiu2005/SpektraLab_library](https://github.com/JamesQiu2005/SpektraLab_library) (public, MIT). Built there by `./build.sh release`, at the tag named above. |
 | **Licence** | MIT (the SDK repository's `LICENSE`). It is a separate program that SpektraLab starts and talks to over pipes; this repository carries the built binary, not its source. |
-| **Date** | 2026-10-18 |
+| **Date** | 2026-10-18; 0.2.0 on 2026-10-23 (the Mac's library data layer, `app/SpektraLab/MAC-LIBRARY-DATA.md`); 0.2.1 on 2026-10-24 (an import into a Capture One mirror is a Recent Imports album, under a row of SpektraLab's); **0.3.0** on 2026-10-24 (`capture_one.copy`, `capture_one.update`, `images.add recent_import_at`, `library.info.copied_from`; schema 3, and a 0.2.x helper refuses a library 0.3.0 has opened); **0.3.1** on 2026-10-25 (`images.remove`, and the kind `pair` for a half-frame pair's `.spektrapair`; schema 3 unchanged, so a 0.3.0 helper still opens the same libraries and calls such a row `other`). The SDK's `API-SPEC.md` at the published tag is authoritative for them |
 
 SpektraLab 2.0 manages libraries the way Capture One does: catalogs, sessions, albums, folders,
 variants, ratings and colour tags. It can also open an existing Capture One catalog. All of that lives
@@ -125,17 +125,26 @@ stale. `sdk.methods` lists the table from the binary itself. *L* means the metho
 | `edit.delete` | L | `variant` | `deleted` |
 | `meta.set` | L | `variants[]` or `images[]`, `rating` 0–5 or null, `color_tag` 0–7 or null | `updated`. null hands the value back to Capture One |
 | `images.trash` | L | `images[]`, `trashed` true, false or null | `updated`. A flag only; no file moves |
+| `images.remove` | L | `images[]` | `removed`, `refused[] {image, code}`: forgets rows whose file is gone (`file_present` while it is there, `read_only` for Capture One's), with their variants, edits and album places; never a file. The app uses it for a half-frame pair's row once it has deleted the pair's file (0.3.1) |
 | `variant.create` | L | `image`, `from_variant`? | `variant`, `position`, `edit_copied`: a second print from one negative |
-| `images.add` | L | `items[]` (a path, or `{path, metadata}`), `mode` (`reference` or `copy`), `collection`? | `results[] {image, variant, existing, stored_at?, error?}`. Never overwrites |
+| `images.add` | L | `items[]` (a path, or `{path, metadata}`), `mode` (`reference` or `copy`), `collection`? | `results[] {image, variant, existing, stored_at?, error?}`, `recent_import`? (the import's album; in a Capture One mirror, under a Recent Imports row of SpektraLab's, 0.2.1). Never overwrites |
 | `collection.create` / `update` / `delete` / `add` / `remove` | L | `kind`, `name`, `parent`, `criteria` (smart albums use the `images.list` filter), `images[]` | SpektraLab collections only. Capture One's answer `read_only` |
+| `images.facets` | L | the `images.list` scope (`collection`, `recursive`, `filter`, `include_trashed`) | `total`, counts per `rating`, `color_tag`, `kind`, `captured {years, months, days, undated}`, `camera`, `lens`, `keyword`, `edited`, `undescribed`; each facet without its own filter keys (0.2.0) |
+| `images.describe` | L | `items[] {image, metadata}` | `updated`: what the app read of a file's header, for rows a folder sync added (0.2.0) |
+| `folders.add` / `list` / `sync` / `remove` | L | `path`, `recursive`?, `skip[]`? / — / `folder`? / `folder` | a referenced folder kept in step: new files added, moved files keep their row, gone files marked removed, an offline folder untouched; a session's own folder is synced too (0.2.0) |
 | `session.folders` | L | — | `folders[] {path, relative_path, role, outside_session, exists, image_count}` |
 | `session.scan` | L | — | `{seen, added, missing}`: files that appeared in the session folder |
 | `session.move` / `session.restore` | L | `images[]`, `to` (`capture`, `selects`, `output`, `trash` or a relative folder), `on_conflict` (`fail` or `suffix`) | `moved[] {image, from, to}`, `conflicts[]`. Crash-safe, never overwrites |
 | `session.trash.plan` / `.commit` | L | — / `removed_paths[]` | the files in the session's Trash / `dropped`, `refused[]` |
 
-Filter keys: `min_rating`, `max_rating`, `color_tags[]`, `kinds[]` (`raw`, `raster`, `movie`,
-`other`), `text`, `captured_from`, `captured_to` (`YYYY-MM-DD[THH:MM:SS]`), `camera_model`,
-`has_edit`.
+Filter keys: `min_rating`, `max_rating`, `ratings[]`, `color_tags[]`, `kinds[]` (`raw`, `raster`,
+`movie`, `pair` (0.3.1: a `.spektrapair`), `other`), `text`, `captured_from`, `captured_to` (`YYYY-MM-DD[THH:MM:SS]`), `camera_model`,
+`camera_models[]`, `lenses[]`, `keywords[]`, `has_edit`, `described`.
+
+0.2.0 also gives `collections.list` rows a `title` and a `created_at` (a Capture One Recent Imports
+album's import time), gives SpektraLab's own catalogs and sessions their fixed rows (root, All Images,
+Recent Imports, Trash, In Catalog) with a Recent Imports album per import, and migrates a library to
+schema 2 when it is opened: a 0.1.0 helper refuses it afterwards.
 
 ## 5. How the app runs its library on it
 
@@ -160,11 +169,13 @@ images.
 **The browser.**
 
 - `images.list` for the selected collection, paged, sorted by `captured`.
-- Thumbnails come from the app's own `ThumbnailCache`, keyed by `path`. Capture One's `Cache/` is
-  never read.
+- Thumbnails are the camera's embedded previews, from the app's own `ThumbnailCache.cameraPreviews`,
+  keyed by `path`, and never a SpektraLab develop (the grid and the Info rail say "Embedded preview").
+  Capture One's `Cache/` is never read.
 - `exists: false` (from `check_files`) and `locations.list` drive the offline badge and **Locate
   Folder…**, which calls `location.relink`.
 - Ratings and colour tags are `meta.set`. Delete is `images.trash`.
+- A half-frame pair is a row too (0.3.1): the app adds its recipe file, `<app support>/Pairs/<name>.spektrapair`, by reference (kind `pair`), and forgets the row with `images.remove` after deleting that file (`app/SpektraLab/MAC-LIBRARY-DATA.md` §2i). The helper never reads the file.
 - Filters are the `filter` object; a saved filter is a smart album.
 
 **Opening a frame for editing.**
@@ -242,10 +253,66 @@ forward on open; an older helper refuses a newer library rather than misreading 
 - `tests/host_smoke.swift` drives this binary from Swift exactly as §2 describes: link, page, edit,
   conflict, ping and shutdown.
 
+**Verified 2026-10-18, in the app (§9):**
+
+- The Copy Files phase embeds the helper at `Contents/Helpers/spklib-host`; the bundle passes
+  `codesign --verify --deep --strict`, and the embedded helper answers `sdk.version`.
+- `LibraryTests` drive the vendored binary from the app's own client: create a catalog and a session,
+  add and scan, an edit's round trip (identical `Sidecar`), `conflict`, and `Session` handed a
+  library's frames.
+
 **Not verified:**
 
 - The x86_64 half of the binary has not been run, because this Mac has no Rosetta.
-- The Copy Files phase, Code Sign On Copy and a notarised build carrying the helper have not been done
-  yet.
+- A notarised Developer ID build carrying the helper. `Tools/package.sh` now refuses a helper without
+  the hardened runtime, but no release has been made with it.
 - Capture One sessions are probe-only until their `.cosessiondb` and `.cos` formats have been checked
   against a real session.
+
+## 9. How the app runs it (2.0)
+
+| Part | Where |
+|---|---|
+| The process: start on first use, the ready line, `abi`, routing replies by `id`, restart | `Library/LibraryHost.swift` |
+| The methods, typed | `Library/LibraryAPI.swift` |
+| A library's edits as the editor's settings | `Library/LibrarySettingsStore.swift`, behind `Model/FrameSettingsStore.swift` |
+| The Library window's state, and the handoff to the editor | `Library/LibraryModel.swift` |
+| The window: rail, grid, Info rail; File menu items | `Library/LibraryWindow.swift`, `LibraryRail.swift`, `LibraryInfoRail.swift`, `LibraryPanels.swift` |
+| Embedding and signing | `Tools/gen-project.py` (Copy Files), `Tools/sign-library-helper.sh`, `Tools/check-bundle-resources.sh` (the SHA-256) |
+
+Decisions the app took that this document did not spell out:
+
+- **One seam in `Session`.** Every read and write of a frame's settings goes through a
+  `FrameSettingsStore`. A folder's is `SidecarFileStore`, which is the 1.x calls unchanged;
+  `Session.open(urls:)` restores it every time. Frames handed over by the Library use
+  `LibrarySettingsStore`, which falls back to the sidecar files for anything it does not map (a
+  half-frame pair, a file dropped on the strip).
+- **`load` returns the truth or nothing.** A library frame is not put on the canvas until its edit has
+  arrived, and the store refuses to save over an edit it has not read. Otherwise the frame switch's save
+  would write defaults over a real edit.
+- **No edit for a photo only looked at.** Opening a RAW fills in its as-shot white balance. A frame whose
+  settings differ from a new `Sidecar` only by that is not stored, so `has_edit` and the grid's Print mark
+  mean "changed or developed", not "opened".
+- **The 1.x sidecar is adopted by reading, never by moving.** `Sidecar.load(for:writes: false)` finds
+  it, `edit.put {base_revision: 0}` stores it, and the file beside the photograph stays where it was.
+- **The cache is bounded.** At most 256 edits are kept, as encoded bytes; the strip's states and crops
+  go to `Session` as they are read.
+- **A reset is an edit of no settings.** Film ⋯ → Reset All Settings to the RAW Decode, and the strip's
+  reset of a frame off the canvas, `edit.put` an empty `Sidecar`, not "no edit": the revision moves, so
+  a 1.x sidecar beside the photograph is not adopted again. The cache holds the empty edit before the
+  call returns, because the Film-menu reset reopens the frame at once.
+- **Each variant has its own developed picture.** The strip's developed thumbnails
+  (`Import/DevelopedThumbnails.swift`, on disk so they outlive the RAM cache) are scoped by
+  `FrameSettingsStore.pictureScope`: a folder frame's under its sidecar, a library frame's under its
+  variant. The session says which frames are developed, so a library frame never shows the picture of
+  a 1.x sidecar that says "developed" about another edit.
+- **Undo does not cross stores.** Both histories, the settings' and the grade's, are per frame and are
+  dropped when the editor changes store or a library hands frames over, since the same file is other
+  settings in each.
+- **Capture One's ratings and tags are not edited from the app** (the design's rule 3), though
+  `meta.set` would keep a SpektraLab override. A rating key says so.
+- **No half-frame pairs and no reordering** from a library's result.
+- **Capture One sessions** are probed and stop there. The Library offers the session's Capture folder
+  as a plain folder.
+- **The Library is its own window.** PRD-v2.0.0 §16 Q2 is still open, and the window's view does not
+  depend on its host.

@@ -11,7 +11,7 @@ does the compressor is already involved.
 Two things are asked of this probe, and the second is the interesting one:
 
 1. Does the trim fire, and does the pool actually come back? With a control --
-   `SPEKTRAFILM_IDLE_TRIM_SECONDS=0` disables the timer, and the same script
+   `SPEKTRALAB_IDLE_TRIM_SECONDS=0` disables the timer, and the same script
    with the same wait must find the pool still held. Without that, a green run
    would only prove that a pool which was never large is small.
 2. **What does the first render after the trim cost?** §1.2's "page faults are
@@ -179,7 +179,7 @@ print(json.dumps({{
 
 def run_child(h: int, w: int, idle_seconds: float, wait_s: float, cycles: int) -> dict:
     env = dict(os.environ)
-    env["SPEKTRAFILM_IDLE_TRIM_SECONDS"] = str(idle_seconds)
+    env["SPEKTRALAB_IDLE_TRIM_SECONDS"] = str(idle_seconds)
     script = CHILD.format(tests=str(Path(__file__).resolve().parent), h=h, w=w,
                           wait_s=wait_s, cycles=cycles)
     proc = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True)

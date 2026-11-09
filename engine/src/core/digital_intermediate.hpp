@@ -90,7 +90,7 @@ struct DiConstants {
 // colour fit see exactly what a uniform patch of the image would.
 bool di_constants(const Colour& colour, const Blob& blob, const Params& params,
                   const Vec& tc_lut, size_t side, const Mat3& tc_b, const Vec& film_sensitivity,
-                  DiConstants& out, std::string& error);
+                  DiConstants& out, std::string& error, bool log_positive_only = false);
 
 // The per-channel log10 offset the live print controls give the DI positive:
 // print brightness as true stops, and the two filter shifts matched to the

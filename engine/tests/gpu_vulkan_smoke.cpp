@@ -14,7 +14,7 @@
 #include "gpu/gpu.hpp"
 #include "gpu_vulkan_read.hpp"
 #include "numeric.hpp"
-#include "spektrafilm/spk_engine.h"
+#include "spektralab/spk_engine.h"
 
 namespace {
 // Set from math_mode: an accepted unfused-fma device (lavapipe).

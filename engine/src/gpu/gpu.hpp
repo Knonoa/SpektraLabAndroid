@@ -130,8 +130,8 @@ struct PoolAudit {
     //                        `release` subtracting a *persistent* buffer that
     //                        no `add` had ever counted.
     //
-    //                        **It shipped in 1.0.2.** `be7705e` (the report)
-    //                        and `a9021ff` (the handler) are both ancestors of
+    //                        **It shipped in 1.0.2.** `unpublished-revision` (the report)
+    //                        and `unpublished-revision` (the handler) are both ancestors of
     //                        `spektralab-v1.0.2`, so on those installs the
     //                        warn-level trim has been sized from a wrapped sum
     //                        since the first frame switch of a session. Critical
@@ -440,6 +440,23 @@ public:
     // kind of event at a lower level, and a counter answers the question a
     // report asks of them.
     virtual bool take_critical_pressure() = 0;
+
+    // What the GPU did for the calling thread's frame, for the log: the
+    // command buffers it waited on, their time on the GPU, the longest wait
+    // and the longest delay before the GPU started one. A 1.3.3 batch had a
+    // 7 s render take 1,010 s with nothing logged in between, and no way to
+    // tell a GPU that ran slowly from one that did not run (2026-10-19).
+    //
+    // Per thread, because `begin_frame` is: two renders on two threads must
+    // not add into each other's figures. Reset by `begin_frame`.
+    struct FrameStats {
+        uint32_t command_buffers = 0;
+        double gpu_ms = 0;        // sum of GPUEndTime - GPUStartTime
+        double wait_ms_max = 0;   // longest wait for one command buffer
+        double queue_ms_max = 0;  // longest commit -> GPUStartTime
+    };
+    // A backend that does not measure reports zeros.
+    virtual FrameStats frame_stats() const { return {}; }
 };
 
 // --- BufferRef, once Gpu is complete ---------------------------------------

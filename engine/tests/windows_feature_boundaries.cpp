@@ -1,5 +1,5 @@
 // Exercise Windows feature refusals through the exported DLL boundary.
-#include "spektrafilm/spk_engine.h"
+#include "spektralab/spk_engine.h"
 
 #include <array>
 #include <iostream>

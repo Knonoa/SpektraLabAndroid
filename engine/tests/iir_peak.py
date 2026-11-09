@@ -28,7 +28,7 @@ comes from a worktree:
 
     git worktree add /tmp/spk-head HEAD
     (cd /tmp/spk-head/engine && ./build.sh dylib)
-    python3 engine/tests/iir_peak.py --old /tmp/spk-head/engine/build/libspektrafilm_engine.dylib
+    python3 engine/tests/iir_peak.py --old /tmp/spk-head/engine/build/libspektralab_engine.dylib
 
 **A note on the machine.** The peak differential is 3.7 GB at 102 MP, which is
 thirty times the size-independent ~128 MB of driver arena that made small-frame
@@ -182,7 +182,7 @@ def main() -> int:
     else:
         h, w = (int(v) for v in args.big.split("x"))
     mp = h * w / 1e6
-    new_path = args.new or spk_ctypes.ENGINE / "build" / "libspektrafilm_engine.dylib"
+    new_path = args.new or spk_ctypes.ENGINE / "build" / "libspektralab_engine.dylib"
     print(f"frame {w}x{h}  ({mp:.1f} MP, one plane {h * w * 3 * 4 / 1e9:.2f} GB)")
     print(f"swap:   {swap()}")
     print(f"old:    {args.old}")

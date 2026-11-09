@@ -64,7 +64,7 @@ void cam16ucs_to_xyz(const Cam16Setup& st, const double jab[3], double xyz[3]);
 
 // The whole of `_setup_for(output_color_space)`, table included.
 bool cam16_setup_for(const Colour& colour, const std::string& output_color_space,
-                     Cam16Setup& out, std::string& error);
+                     Cam16Setup& out, std::string& error, const std::string& baked_dir = {});
 
 // `reinhard_knee`: identity below `threshold`, smoothly asymptotic at `limit`
 // above it. Bit-identical to the ACES RGC v1.3 reference.

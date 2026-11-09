@@ -20,6 +20,7 @@ add_library(spektralab_core STATIC
     src/core/hanatos.cpp
     src/core/json.cpp
     src/core/latitude_fit.cpp
+    src/core/minilab.cpp
     src/core/numeric.cpp
     src/core/params.cpp
     src/core/print_lut.cpp
@@ -29,6 +30,8 @@ add_library(spektralab_core STATIC
     src/core/spectral.cpp
 )
 target_compile_features(spektralab_core PUBLIC cxx_std_20)
+find_package(Threads REQUIRED)
+target_link_libraries(spektralab_core PUBLIC Threads::Threads)
 target_include_directories(spektralab_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/core>
 )
@@ -42,6 +45,7 @@ set(SPEKTRALAB_DEPS_DIR "${SPEKTRALAB_REPO_ROOT}/build/deps" CACHE PATH
 # runnable engine still requires an implementation of gpu::Gpu.
 add_library(spektralab_pipeline OBJECT
     src/pipeline/blur.cpp
+    src/pipeline/disk_checkpoint.cpp
     src/pipeline/engine.cpp
     src/pipeline/pipeline.cpp
     src/pipeline/scene_latitude.cpp
@@ -222,7 +226,7 @@ if(NOT APPLE)
             endif()
             add_library(spektralab_engine_shared SHARED ${shared_sources})
             set_target_properties(spektralab_engine_shared PROPERTIES
-                OUTPUT_NAME spektrafilm_engine PREFIX "")
+                OUTPUT_NAME spektralab_engine PREFIX "")
             target_compile_features(spektralab_engine_shared PUBLIC cxx_std_20)
             target_include_directories(spektralab_engine_shared PRIVATE
                 "${CMAKE_CURRENT_SOURCE_DIR}/include"

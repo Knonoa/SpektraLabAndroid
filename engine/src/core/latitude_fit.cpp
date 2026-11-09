@@ -99,16 +99,21 @@ bool read_boundaries(Medium& m, std::string& error) {
     return true;
 }
 
-SceneStats scene_stats(std::vector<double> E) {
-    SceneStats s;
-    s.samples = E.size();
-    s.histogram.assign(SceneStats::kBins, 0.0);
-    if (E.empty()) return s;
+std::vector<double> stop_histogram(const std::vector<double>& E) {
+    std::vector<double> h(SceneStats::kBins, 0.0);
     const double width = (SceneStats::kHi - SceneStats::kLo) / SceneStats::kBins;
     for (double e : E) {
         const int b = std::clamp(int(std::floor((e - SceneStats::kLo) / width)), 0, SceneStats::kBins - 1);
-        s.histogram[size_t(b)] += 1.0 / double(E.size());
+        h[size_t(b)] += 1.0 / double(E.size());
     }
+    return h;
+}
+
+SceneStats scene_stats(std::vector<double> E) {
+    SceneStats s;
+    s.samples = E.size();
+    s.histogram = stop_histogram(E);
+    if (E.empty()) return s;
     s.p01 = rank(E, 10);
     s.p1 = rank(E, 100);
     s.p50 = rank(E, 5000);

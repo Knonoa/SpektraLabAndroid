@@ -102,7 +102,7 @@ bool Blob::open(const std::string& path, std::string& error) {
     base_ = static_cast<const uint8_t*>(m);
 #endif
 
-    if (std::memcmp(base_, kMagic, 4) != 0) { error = path + ": not a spektrafilm resource blob"; return false; }
+    if (std::memcmp(base_, kMagic, 4) != 0) { error = path + ": not a SpektraLab engine resource blob"; return false; }
     uint32_t version, count;
     std::memcpy(&version, base_ + 4, 4);
     std::memcpy(&count, base_ + 8, 4);

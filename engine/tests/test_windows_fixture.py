@@ -26,7 +26,7 @@ class FixtureTests(unittest.TestCase):
         self.fixture = self.root / "fixture with spaces"
         self.manifest = wf.generate_fixture(self.fixture, size=6)
         self.resources = self.root / "resources"
-        for name in ("spektrafilm_constants.bin", "neutral_print_filters.json", "print_luts.json",
+        for name in ("spektralab_constants.bin", "neutral_print_filters.json", "print_luts.json",
                      "profiles/kodak_portra_400.json", "profiles/kodak_portra_endura.json"):
             path = self.resources / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -34,7 +34,7 @@ class FixtureTests(unittest.TestCase):
         self.driver = self.root / "build with spaces" / "spk_render_fixture.exe"
         self.driver.parent.mkdir()
         self.driver.write_bytes(b"test driver, never executed")
-        (self.driver.parent / "spektrafilm_engine.dll").write_bytes(b"test DLL, never loaded")
+        (self.driver.parent / "spektralab_engine.dll").write_bytes(b"test DLL, never loaded")
         self.output_dir = self.root / "run with spaces"
 
     def pixels(self):
@@ -115,7 +115,7 @@ class FixtureTests(unittest.TestCase):
         after = wf.resource_snapshot(self.resources)
         self.assertNotEqual(before["tree_sha256"], after["tree_sha256"])
         self.assertEqual(before["baked_sha256"], after["baked_sha256"])
-        (self.resources / "spektrafilm_constants.bin").write_bytes(b"changed model")
+        (self.resources / "spektralab_constants.bin").write_bytes(b"changed model")
         self.assertNotEqual(after["baked_sha256"], wf.resource_snapshot(self.resources)["baked_sha256"])
 
     def test_run_records_success_provenance_and_rejects_existing_output(self):

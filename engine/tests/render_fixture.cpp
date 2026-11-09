@@ -1,6 +1,6 @@
 // Fixed, already-decoded pixels through the public C ABI. Link this driver to
 // the test DLL: no private engine headers or C++ symbols cross that boundary.
-#include "spektrafilm/spk_engine.h"
+#include "spektralab/spk_engine.h"
 
 #include <algorithm>
 #include <bit>

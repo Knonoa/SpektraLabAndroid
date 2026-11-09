@@ -1,6 +1,10 @@
+#include "cam16_bake.hpp"
 #include "cam16.hpp"
 
 #include <array>
+#include <system_error>
+#include <thread>
+#include <vector>
 #include <cmath>
 
 namespace spk {
@@ -130,18 +134,14 @@ void xyz_to_cam16ucs(const Cam16Setup& st, const double xyz_in[3], double jab[3]
     jab[2] = Mp * std::sin(h);
 }
 
-void cam16ucs_to_xyz(const Cam16Setup& st, const double jab[3], double xyz_out[3]) {
-    const double Jp = jab[0];
+static void cam16_inverse_hoisted(const Cam16Setup& st, const double jab[3], double xyz_out[3],
+                                  double fl_quarter, double e_c, double A, double sq) {
     const double Mp = std::hypot(jab[1], jab[2]);
     const double h = std::atan2(jab[2], jab[1]);
 
     const double M = (std::exp(Mp * 0.0228) - 1.0) / 0.0228;
-    const double J = Jp / (1.7 - 0.007 * Jp);
-    const double C = M / std::pow(st.F_L, 0.25);
+    const double C = M / fl_quarter;
 
-    const double e_c = std::pow(1.64 - std::pow(0.29, st.n), 0.73);
-    const double A = st.A_w * spow(J / 100.0, 1.0 / (st.c * st.z));
-    const double sq = std::sqrt(std::fabs(J) / 100.0);
     const double t = (sq > 0.0 && C > 0.0) ? std::pow(C / (sq * e_c), 1.0 / 0.9) : 0.0;
     const double e_t = 0.25 * (std::cos(h + 2.0) + 3.8);
 
@@ -197,8 +197,16 @@ void cam16ucs_to_xyz(const Cam16Setup& st, const double jab[3], double xyz_out[3
     for (int i = 0; i < 3; ++i) xyz_out[i] = xyz[i] / 100.0;
 }
 
+void cam16ucs_to_xyz(const Cam16Setup& st, const double jab[3], double xyz_out[3]) {
+    const double J = jab[0] / (1.7 - 0.007 * jab[0]);
+    cam16_inverse_hoisted(st, jab, xyz_out, std::pow(st.F_L, 0.25),
+                         std::pow(1.64 - std::pow(0.29, st.n), 0.73),
+                         st.A_w * spow(J / 100.0, 1.0 / (st.c * st.z)),
+                         std::sqrt(std::fabs(J) / 100.0));
+}
+
 bool cam16_setup_for(const Colour& colour, const std::string& cs, Cam16Setup& out,
-                     std::string& error) {
+                     std::string& error, const std::string& baked_dir) {
     const Colour::Colourspace* space = nullptr;
     if (!colour.colourspace(cs, space, error)) return false;
     const double white[2] = {space->whitepoint[0], space->whitepoint[1]};
@@ -223,8 +231,14 @@ bool cam16_setup_for(const Colour& colour, const std::string& cs, Cam16Setup& ou
     for (size_t i = 0; i < kCmaxNH; ++i)
         out.h_grid[i] = -kPi + 2.0 * kPi * double(i) / double(kCmaxNH);
 
+    if (!baked_dir.empty() && cam16_bake::read(baked_dir.c_str(), cs, out)) return true;
     out.c_max_table.assign(kCmaxNL * kCmaxNH, 0.0);
-    for (size_t li = 0; li < kCmaxNL; ++li) {
+    const double fl_quarter = std::pow(out.F_L, 0.25);
+    const double e_c = std::pow(1.64 - std::pow(0.29, out.n), 0.73);
+    auto row = [&](size_t li) {
+        const double J = out.l_grid[li] / (1.7 - 0.007 * out.l_grid[li]);
+        const double A = out.A_w * spow(J / 100.0, 1.0 / (out.c * out.z));
+        const double sq = std::sqrt(std::fabs(J) / 100.0);
         for (size_t hi_ = 0; hi_ < kCmaxNH; ++hi_) {
             const double L = out.l_grid[li], hue = out.h_grid[hi_];
             const double cosh = std::cos(hue), sinh = std::sin(hue);
@@ -233,7 +247,7 @@ bool cam16_setup_for(const Colour& colour, const std::string& cs, Cam16Setup& ou
                 const double mid = (lo + hi) * 0.5;
                 const double jab[3] = {L, mid * cosh, mid * sinh};
                 double xyz[3], rgb[3];
-                cam16ucs_to_xyz(out, jab, xyz);
+                cam16_inverse_hoisted(out, jab, xyz, fl_quarter, e_c, A, sq);
                 out.m_to_rgb.apply(xyz, rgb);
                 // In gamut iff every channel is in [0, 1]. The 1e-6 slack
                 // absorbs the matrix-inverse noise that would otherwise leave
@@ -245,6 +259,19 @@ bool cam16_setup_for(const Colour& colour, const std::string& cs, Cam16Setup& ou
             }
             out.c_max_table[li * kCmaxNH + hi_] = lo;
         }
+    };
+    // Disjoint rows, at most four workers, all joined before returning. This
+    // parallelises immutable setup, not images. Resource-constrained hosts may
+    // refuse a thread; join what started before recomputing serially.
+    try {
+        std::vector<std::jthread> workers;
+        workers.reserve(3);
+        for (size_t t = 1; t < 4; ++t) workers.emplace_back([&, t] {
+            for (size_t li = t; li < kCmaxNL; li += 4) row(li);
+        });
+        for (size_t li = 0; li < kCmaxNL; li += 4) row(li);
+    } catch (const std::system_error&) {
+        for (size_t li = 0; li < kCmaxNL; ++li) row(li);
     }
     return true;
 }

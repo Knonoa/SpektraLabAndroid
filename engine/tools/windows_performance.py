@@ -52,7 +52,7 @@ def sample(session, width, height, kind):
 def worker(args):
     # Explicitly clear inherited instrumentation for official measurements.
     os.environ.pop("SPK_DIAGNOSTIC_DEVICE_LOCAL", None)
-    for name in ("SPEKTRAFILM_NODE_TIMINGS", "SPEKTRAFILM_TRANSFER_TIMINGS"):
+    for name in ("SPEKTRALAB_NODE_TIMINGS", "SPEKTRALAB_TRANSFER_TIMINGS"):
         if args.diagnostic:
             os.environ[name] = "1"
         else:

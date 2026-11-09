@@ -272,7 +272,7 @@ struct ContrastMaskParams {
     /// The base extractor, by name. Only "gaussian" (the classic unsharp mask)
     /// is a product scheme: the self-guided filter behaved like the per-pixel
     /// arm at its fixed threshold (RFC-024 §12.4), so it is reachable only
-    /// through `SPEKTRAFILM_MASK_GUIDED` for research.
+    /// through `SPEKTRALAB_MASK_GUIDED` for research.
     std::string scheme = "gaussian";
 };
 
@@ -316,6 +316,20 @@ struct SceneLatitudeParams {
 bool is_known_scene_latitude_norm(const std::string& norm);
 bool is_known_camera_filter(const std::string& name);
 
+// The Decode curve (API-SPEC §17): a tone curve the host draws on the scene
+// before the film, as a table. **The axis is stops about the metered mid-grey**,
+// as Scene Latitude's is: the unit square's 0…1 is −kSceneCurveStops…
+// +kSceneCurveStops on both axes, so the curve's centre is mid-grey and its
+// identity is the diagonal. Five rows of `n` samples, in the order the host's
+// Edit curve keeps them -- rgb, luma, r, g, b -- each row the curve at i/(n−1),
+// in 0…1. Applied luma first (a gain on Y, hue kept), then rgb on each channel,
+// then each channel's own, as the Layer 2 pass orders them. "" = off.
+constexpr double kSceneCurveStops = 8.0;
+constexpr size_t kSceneCurveRows = 5;
+/// Parses the wire's text -- `5n` comma-separated numbers in 0…1, n ≥ 2 --
+/// into `table` (row-major) and `n`. "" parses to an empty table.
+bool parse_scene_curve(const std::string& text, std::vector<float>& table, size_t& n, std::string& error);
+
 struct CameraParams {
     double exposure_compensation_ev = 0.0;
     bool auto_exposure = true;
@@ -334,6 +348,9 @@ struct CameraParams {
     std::string filter;
     DiffusionFilterParams diffusion_filter;
     SceneLatitudeParams scene_latitude;
+    /// The Decode curve's table, as the wire carries it (`parse_scene_curve`).
+    /// Native only; "" = off, and the node is not dispatched.
+    std::string scene_curve;
 };
 
 struct EnlargerParams {

@@ -6,8 +6,8 @@ minimal Win32 viewer, plus a Qt Quick editor. These executables do not require P
 macOS `build.sh`, Metal implementation and Xcode frontend retain their own
 build paths.
 
-The port began at `8a3187434ced21253940f84c746b94128860a2f8` and is integrated
-with the author's `Windows_Port` starting point, `61bfc49a38e92b9d7915754982de3af13245403f`.
+The port began at `unpublished-revision` and is integrated
+with the author's `Windows_Port` starting point, `unpublished-revision`.
 Capabilities that have not been explicitly ported remain unsupported. Passing the local
 tests does not establish whole-image equivalence with Metal or the external
 Python film-model reference.
@@ -76,7 +76,7 @@ directory; tracked baked resources do not need regeneration.
 
 Build outputs are in `build/windows/engine`. The native CLI is
 `spk_raw_render.exe`, the minimal viewer is `SpektraLab.exe`, and regression
-tools use `spektrafilm_engine.dll`. Keep each executable's adjacent runtime
+tools use `spektralab_engine.dll`. Keep each executable's adjacent runtime
 DLLs, complete `resources` directory and licence notices when moving it.
 The native hosts statically link the engine and LibRaw; the shared engine DLL
 is still needed by tools that explicitly load it. Vulkan comes from the GPU
@@ -122,7 +122,7 @@ python engine/tools/windows_fixture.py run `
     --fixture-dir build/validation/fixture `
     --output-dir build/validation/fixture-run
 python engine/tools/windows_features.py `
-    --library build/windows/engine/spektrafilm_engine.dll `
+    --library build/windows/engine/spektralab_engine.dll `
     --resources build/windows/engine/resources `
     --output build/validation/features
 ```
@@ -174,11 +174,11 @@ decoded fixture. Native RAW timing is covered separately in the RAW guide.
 Do not replace complete-call timing with a sum of GPU node measurements.
 
 Formal timing disables verbose diagnostics. For a separate diagnostic run,
-`SPEKTRAFILM_TRANSFER_TIMINGS=1` logs memory types, transfer byte counts,
+`SPEKTRALAB_TRANSFER_TIMINGS=1` logs memory types, transfer byte counts,
 elapsed time and staging capacity. It is disabled by default.
 
 The existing parity entry points accept `--resources`; ctypes-based entry
 points also accept `--library` (`--dylib` is an alias). Environment overrides
-are `SPEKTRAFILM_ENGINE_LIBRARY` and `SPEKTRAFILM_ENGINE_RESOURCES`. External
+are `SPEKTRALAB_ENGINE_LIBRARY` and `SPEKTRALAB_ENGINE_RESOURCES`. External
 Metal/Python film-model parity requires a matching reference checkout or
 independently produced outputs; the local gates do not provide that oracle.

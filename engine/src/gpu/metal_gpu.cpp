@@ -19,6 +19,7 @@
 // are the C function-pointer API, which is what keeps this a `.cpp` rather
 // than a `.mm` (see the file header).
 #include <dispatch/dispatch.h>
+#include <mach/mach_time.h>
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -71,6 +72,9 @@ struct Buffer {
     // process dying before anyone can look at the counter. If this is ever
     // removed, remove the counter with it.
     bool in_pending = false;
+    // The host accounts for a borrowed decode plane. We retain its Metal
+    // buffer, but never add its bytes to the engine's persistent ledger.
+    bool borrowed = false;
 };
 
 namespace {
@@ -89,19 +93,27 @@ constexpr size_t kInlineLimit = 4096;
 
 class MetalGpu final : public Gpu {
 public:
-    MetalGpu(MTL::Device* device, bool owns_device, MTL::Library* library, MTL::CommandQueue* queue)
-        : device_(device), owns_device_(owns_device), library_(library), queue_(queue) {}
+    MetalGpu(MTL::Device* device, MTL::Library* library, MTL::CommandQueue* queue,
+             const std::string& archive_path)
+        : archive_path_(archive_path), device_(device), library_(library), queue_(queue) {}
 
     ~MetalGpu() override {
         // First, so no handler can be running (or start) while the pool below
         // is being torn down.
         stop_monitors();
+        if (encoder_) { encoder_->endEncoding(); encoder_->release(); }
+        // A rejected dispatch may still own uploaded inline arguments. Release
+        // their BufferRefs while the pool and its lock are still alive.
+        inflight_.clear();
         for (Buffer* b : pool_) { if (b->mtl) b->mtl->release(); delete b; }
         for (auto& kv : pipelines_) kv.second->release();
+        if (archive_) archive_->release();
         if (command_buffer_) command_buffer_->release();
         if (queue_) queue_->release();
         if (library_) library_->release();
-        if (device_ && owns_device_) device_->release();
+        // create_metal owns one reference in both cases: CreateSystemDefaultDevice
+        // returns ownership, and a caller-supplied device is explicitly retained.
+        if (device_) device_->release();
     }
 
     // The pressure source (§3.2) and the idle timer (§3.1). Called by
@@ -114,7 +126,7 @@ public:
     // as it did before and `pool_stats().pressure_monitor` says so. Nothing
     // about a render may depend on this existing.
     void start_monitors() {
-        pressure_queue_ = dispatch_queue_create("com.spektrafilm.engine.memorypressure", nullptr);
+        pressure_queue_ = dispatch_queue_create("com.spektralab.engine.memorypressure", nullptr);
         if (!pressure_queue_) return;
         pressure_source_ = dispatch_source_create(
             DISPATCH_SOURCE_TYPE_MEMORYPRESSURE, 0,
@@ -129,7 +141,7 @@ public:
         dispatch_activate(pressure_source_);
         // Read once, here, where nothing can race with it (see the seam's
         // comment further down).
-        const char* mode = std::getenv("SPEKTRAFILM_TEST_PRESSURE");
+        const char* mode = std::getenv("SPEKTRALAB_TEST_PRESSURE");
         if (mode && std::strcmp(mode, "critical") == 0) {
             test_pressure_flags_ = DISPATCH_MEMORYPRESSURE_CRITICAL;
         } else if (mode && std::strcmp(mode, "warn") == 0) {
@@ -227,6 +239,7 @@ public:
         // timer reads this and never trims a pool a render is using.
         frames_in_flight_.fetch_add(1, std::memory_order_relaxed);
         last_activity_ns_.store(steady_ns(), std::memory_order_relaxed);
+        frame_stats_ = FrameStats{};
         // Before the reset, and outside the lock (the handler takes it): a
         // `warn` arriving here trims to the *previous* frame's peak, which is
         // the right reading for an event that lands between frames -- the next
@@ -293,8 +306,10 @@ public:
         if (was_live && !buffer->persistent) sub_live_locked(buffer->bytes);
         else if (!was_live) ++audit_.over_releases;   // a release of a buffer nobody holds
         if (buffer->persistent) {
-            persistent_bytes_ -= buffer->bytes;
-            --persistent_buffers_;
+            if (!buffer->borrowed) {
+                persistent_bytes_ -= buffer->bytes;
+                --persistent_buffers_;
+            }
             if (buffer->file_backed) {
                 file_backed_bytes_ -= buffer->bytes;
                 --file_backed_buffers_;
@@ -497,12 +512,12 @@ public:
     // working machine, so that path stays inferred. RFC-020 §4.7 carries the
     // same qualification.
     static std::string scratch_dir() {
-        // A test seam, the same shape as `SPEKTRAFILM_TEST_PRESSURE`: it is
+        // A test seam, the same shape as `SPEKTRALAB_TEST_PRESSURE`: it is
         // the only way to reach the "no plane file can be made" branch, and a
         // branch no test reaches is a branch nobody has run. Unset, the
         // process's own scratch directory is used and this costs one
         // `getenv` per plane.
-        const char* chosen = std::getenv("SPEKTRAFILM_PLANE_DIR");
+        const char* chosen = std::getenv("SPEKTRALAB_PLANE_DIR");
         if (chosen && *chosen) return std::string(chosen);
         // `confstr` rather than `TMPDIR`: the environment is the caller's to
         // change and this is not. A path that does not fit is not a path.
@@ -522,7 +537,7 @@ public:
         const size_t page = static_cast<size_t>(getpagesize());
         const size_t mapped = (bytes + page - 1) / page * page;
 
-        std::string path = scratch_dir() + "/spektrafilm-plane-XXXXXX";
+        std::string path = scratch_dir() + "/spektralab-plane-XXXXXX";
         const int fd = mkstemp(path.data());
         if (fd < 0) {
             // An optimisation that cannot run is not a reason to fail an open.
@@ -601,7 +616,9 @@ public:
         // holding the only *other* reference to them for the length of one
         // call is not a holding of its own, and counting it would double the
         // decode in every report.
-        return BufferRef(this, new Buffer{mtl, bytes, 1, false, true});
+        auto* buffer = new Buffer{mtl, bytes, 1, false, true};
+        buffer->borrowed = true;
+        return BufferRef(this, buffer);
     }
 
     void* contents(Buffer* b) override { return b->mtl->contents(); }
@@ -635,6 +652,7 @@ public:
     }
 
     bool flush(std::string& error) override {
+        auto autorelease_pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
         // Anything held only for an encoded-but-unsubmitted dispatch can go
         // back to the pool once the work has run -- and it has run, or this
         // line is not reached.
@@ -654,9 +672,13 @@ public:
             void now() { v->clear(); }
         } inflight{&inflight_};
         if (!command_buffer_) { inflight.now(); reclaim(); return true; }
-        if (encoder_) { encoder_->endEncoding(); encoder_ = nullptr; }
+        if (encoder_) { encoder_->endEncoding(); encoder_->release(); encoder_ = nullptr; }
+        const double committed = host_seconds();
+        const auto wait_started = std::chrono::steady_clock::now();
         command_buffer_->commit();
         command_buffer_->waitUntilCompleted();
+        note_timing(committed, std::chrono::duration<double, std::milli>(
+                                   std::chrono::steady_clock::now() - wait_started).count());
         const MTL::CommandBufferStatus status = command_buffer_->status();
         if (status == MTL::CommandBufferStatusError) {
             NS::Error* err = command_buffer_->error();
@@ -790,6 +812,8 @@ public:
         return freed;
     }
 
+    FrameStats frame_stats() const override { return frame_stats_; }
+
     bool take_critical_pressure() override {
         // One atomic exchange, not a load and then a store: two renders on two
         // threads must not both report the same event as their own.
@@ -797,6 +821,35 @@ public:
     }
 
 private:
+    // --- per-frame GPU timing (`frame_stats`) ------------------------------
+
+    // The calling thread's, as `Gpu::FrameStats` says: a member would add two
+    // threads' renders into one figure.
+    static inline thread_local FrameStats frame_stats_{};
+
+    // The host clock Metal's `GPUStartTime` / `GPUEndTime` are stamped in
+    // (`CACurrentMediaTime`'s), in seconds.
+    static double host_seconds() {
+        static const double tick = [] {
+            mach_timebase_info_data_t tb{};
+            mach_timebase_info(&tb);
+            return double(tb.numer) / double(tb.denom) / 1e9;
+        }();
+        return double(mach_absolute_time()) * tick;
+    }
+
+    // After `waitUntilCompleted`, on success or failure: a command buffer that
+    // failed after running a long time is the one a stalled log needs most.
+    void note_timing(double committed, double waited_ms) {
+        FrameStats& s = frame_stats_;
+        ++s.command_buffers;
+        s.wait_ms_max = std::max(s.wait_ms_max, waited_ms);
+        const double start = command_buffer_->GPUStartTime();
+        const double end = command_buffer_->GPUEndTime();
+        if (start > 0 && end > start) s.gpu_ms += (end - start) * 1000.0;
+        if (start > committed) s.queue_ms_max = std::max(s.queue_ms_max, (start - committed) * 1000.0);
+    }
+
     // --- RFC-020 §3.1, the idle form: nobody is editing any more ----------
 
     // The other half of "not at `end_frame`". The pool is kept between renders
@@ -845,7 +898,7 @@ private:
     // function-local static is initialized under the language's own lock and
     // every later read happens after it, which is the ordering the timer
     // handler needs and a plain member would not have. Latched, so like
-    // `SPEKTRAFILM_TEST_PRESSURE` the variable has to be set before the engine
+    // `SPEKTRALAB_TEST_PRESSURE` the variable has to be set before the engine
     // is created.
     //
     // A value of **0 means off** -- no timer at all, which is the control
@@ -854,7 +907,7 @@ private:
     // a behaviour, so it falls back to the shipped number.
     static double idle_trim_seconds() {
         static const double seconds = [] {
-            const char* text = std::getenv("SPEKTRAFILM_IDLE_TRIM_SECONDS");
+            const char* text = std::getenv("SPEKTRALAB_IDLE_TRIM_SECONDS");
             if (!text || !*text) return kIdleTrimSeconds;
             char* end = nullptr;
             const double parsed = std::strtod(text, &end);
@@ -956,12 +1009,12 @@ private:
     // trim would otherwise ship unexercised and a harness could only assert
     // that the numbers did not change.
     //
-    // `SPEKTRAFILM_TEST_PRESSURE=warn|critical` delivers that event at each
+    // `SPEKTRALAB_TEST_PRESSURE=warn|critical` delivers that event at each
     // frame boundary, through the real handler on the real queue -- the queue,
     // the handler, the trim, the flag and the counters are all the shipping
     // ones; what is synthetic is the kernel's decision to send it. Unset, this
     // costs one integer test per boundary and does nothing. The same shape as
-    // `SPEKTRAFILM_NODE_TIMINGS`.
+    // `SPEKTRALAB_NODE_TIMINGS`.
     //
     // Both boundaries, for two different things a harness has to see: at the
     // start, so the render about to run takes the flag and reports it; at the
@@ -977,24 +1030,63 @@ private:
         dispatch_sync_f(pressure_queue_, this, &MetalGpu::test_pressure_event);
     }
 
+    // One optional native-code archive per engine. Metal checks the exact
+    // function/pipeline identity; missing, old and foreign-device archives all
+    // fall back to the bundled safe-math IR. Never write a runtime disk cache.
+    std::string archive_path_;
+    MTL::BinaryArchive* archive_ = nullptr;
+    bool archive_attempted_ = false;
+
     MTL::ComputePipelineState* pipeline(const char* name, std::string& error) {
         auto it = pipelines_.find(name);
         if (it != pipelines_.end()) return it->second;
-        NS::String* fn_name = NS::String::string(name, NS::UTF8StringEncoding);
-        MTL::Function* fn = library_->newFunction(fn_name);
+        // Engine callers include CLI/tests without an Objective-C run loop.
+        // Drain temporary URLs, arrays and driver objects on each cache miss.
+        auto autorelease_pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
+        const auto start = std::chrono::steady_clock::now();
+        MTL::Function* fn = library_->newFunction(NS::String::string(name, NS::UTF8StringEncoding));
         if (!fn) {
-            error = std::string("no kernel '") + name + "' in spektrafilm.metallib";
+            error = std::string("no kernel '") + name + "' in spektralab.metallib";
             return nullptr;
         }
         NS::Error* err = nullptr;
-        MTL::ComputePipelineState* pso = device_->newComputePipelineState(fn, &err);
+        const char* mode = std::getenv("SPK_METAL_ARCHIVE_MODE");
+        const bool disabled = mode && std::strcmp(mode, "off") == 0;
+        const bool required = mode && std::strcmp(mode, "required") == 0; // validation only
+        if (!archive_attempted_) {
+            archive_attempted_ = true;
+            if (!disabled) {
+                auto* desc = MTL::BinaryArchiveDescriptor::alloc()->init();
+                desc->setUrl(NS::URL::fileURLWithPath(NS::String::string(archive_path_.c_str(), NS::UTF8StringEncoding)));
+                archive_ = device_->newBinaryArchive(desc, &err);
+                desc->release();
+            }
+        }
+        auto* desc = MTL::ComputePipelineDescriptor::alloc()->init();
+        desc->setComputeFunction(fn);
+        MTL::ComputePipelineState* pso = nullptr;
+        if (archive_ && !disabled) {
+            const NS::Object* archives[] = {archive_};
+            desc->setBinaryArchives(NS::Array::array(archives, 1));
+            pso = device_->newComputePipelineState(desc, MTL::PipelineOptionFailOnBinaryArchiveMiss, nullptr, &err);
+        }
+        const bool hit = pso != nullptr;
+        if (!pso && !required) {
+            desc->setBinaryArchives(nullptr);
+            pso = device_->newComputePipelineState(desc, MTL::PipelineOptionNone, nullptr, &err);
+        }
+        desc->release();
         fn->release();
         if (!pso) {
             error = std::string("could not build a pipeline for '") + name + "': " +
-                    (err && err->localizedDescription() ? err->localizedDescription()->utf8String() : "unknown");
+                    (err && err->localizedDescription() ? err->localizedDescription()->utf8String() : "archive unavailable");
             return nullptr;
         }
         pipelines_[name] = pso;
+        if (std::getenv("SPK_METAL_PIPELINE_LOG")) {
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            std::fprintf(stderr, "[metal] pipeline %s %.6f archive_hit=%d\n", name, ms, int(hit));
+        }
         return pso;
     }
 
@@ -1094,6 +1186,11 @@ private:
     }
 
     MTL::ComputeCommandEncoder* encoder(std::string& error) {
+        if (encoder_) return encoder_;
+        // These APIs return autoreleased objects. Own them explicitly across
+        // dispatches, so a CLI or long-lived scheduler thread need not supply
+        // an outer Objective-C pool to bound command metadata.
+        auto autorelease_pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
         if (!command_buffer_) {
             command_buffer_ = queue_->commandBuffer();
             if (!command_buffer_) { error = "could not open a command buffer"; return nullptr; }
@@ -1103,12 +1200,12 @@ private:
         if (!encoder_) {
             encoder_ = command_buffer_->computeCommandEncoder();
             if (!encoder_) { error = "could not open a compute encoder"; return nullptr; }
+            encoder_->retain();
         }
         return encoder_;
     }
 
     MTL::Device* device_ = nullptr;
-    bool owns_device_ = false;
     MTL::Library* library_ = nullptr;
     MTL::CommandQueue* queue_ = nullptr;
     MTL::CommandBuffer* command_buffer_ = nullptr;
@@ -1163,6 +1260,7 @@ void Gpu::release_texture_static(void* texture) {
 }
 
 Gpu* Gpu::create_metal(void* device_handle, const std::string& metallib_path, std::string& error) {
+    auto autorelease_pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
     MTL::Device* device = static_cast<MTL::Device*>(device_handle);
     const bool owns = device == nullptr;
     if (owns) device = MTL::CreateSystemDefaultDevice();
@@ -1185,7 +1283,8 @@ Gpu* Gpu::create_metal(void* device_handle, const std::string& metallib_path, st
         device->release();
         return nullptr;
     }
-    auto* gpu = new MetalGpu(device, owns, library, queue);
+    auto* gpu = new MetalGpu(device, library, queue,
+                             metallib_path.substr(0, metallib_path.find_last_of("/\\") + 1) + "spektralab.metalar");
     // After construction, and best-effort: the source's context is the object,
     // and a source that cannot be made leaves pressure unmonitored rather than
     // failing the engine. `MetalGpu`'s own destructor undoes it.

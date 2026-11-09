@@ -186,7 +186,7 @@ export class MockHost {
   private capabilities() {
     return {
       version: 'mock-1.3.1',
-      engine: 'spektrafilm.mock',
+      engine: 'spektralab-engine.mock',
       max_mp: 200,
       max_pixels: 200e6,
       max_texture_dimension_2d: 16384,

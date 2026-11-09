@@ -139,7 +139,7 @@ def main():
         unicode_source = args.output / "尼康 原图 🧪.NEF"
         shutil.copy2(args.input, unicode_source)
         environment = {key: value for key, value in os.environ.items()
-                       if not key.upper().startswith(("PYTHON", "SPEKTRAFILM_"))}
+                       if not key.upper().startswith(("PYTHON", "SPEKTRALAB_"))}
         windows = Path(environment.get("SystemRoot", r"C:\Windows"))
         environment["PATH"] = str(windows / "System32") + os.pathsep + str(windows)
         for mode in args.modes:

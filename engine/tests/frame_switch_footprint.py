@@ -101,7 +101,7 @@ def main() -> int:
 
     big = tuple(int(v) for v in args.big.split("x"))
     small = tuple(int(v) for v in args.small.split("x"))
-    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektrafilm_engine.dylib'}")
+    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektralab_engine.dylib'}")
 
     with spk_ctypes.Engine(dylib=args.dylib) as engine:
         print(f"build:  {engine.build_info}")

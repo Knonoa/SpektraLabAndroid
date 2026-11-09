@@ -28,7 +28,7 @@ static bool nearly(float a, float b, float tol = 1e-6f) {
 }
 
 int main(int argc, char** argv) {
-    const std::string metallib = argc > 1 ? argv[1] : "resources/spektrafilm.metallib";
+    const std::string metallib = argc > 1 ? argv[1] : "resources/spektralab.metallib";
     std::string error;
     gpu::Gpu* g = gpu::Gpu::create_metal(nullptr, metallib, error);
     if (!g) { std::printf("FAIL  create_metal  -- %s\n", error.c_str()); return 1; }

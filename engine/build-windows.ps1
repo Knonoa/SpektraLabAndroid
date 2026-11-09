@@ -150,8 +150,8 @@ try {
         glslang = $GlslangExecutable
         glslang_version = @(& $GlslangExecutable --version)
         glslang_sha256 = (Get-FileHash -LiteralPath $GlslangExecutable -Algorithm SHA256).Hash.ToLowerInvariant()
-        dll = (Join-Path $BuildDirectory 'engine\spektrafilm_engine.dll')
-        dll_sha256 = (Get-FileHash -LiteralPath (Join-Path $BuildDirectory 'engine\spektrafilm_engine.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
+        dll = (Join-Path $BuildDirectory 'engine\spektralab_engine.dll')
+        dll_sha256 = (Get-FileHash -LiteralPath (Join-Path $BuildDirectory 'engine\spektralab_engine.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
         ctest_passed = $true
         native_raw = [bool]$NativeRaw
         desktop = [bool]($Desktop -and $NativeRaw)

@@ -1,7 +1,7 @@
 pragma Singleton
 import QtQuick
 QtObject {
-    // Ported from upstream Theme.swift at 61bfc49, not operating-system defaults.
+    // Ported from upstream Theme.swift at unpublished-revision, not operating-system defaults.
     readonly property color ground: "#5f5f5f"
     readonly property color card: "#2d2d2c"
     readonly property color text: "#faf8f4"

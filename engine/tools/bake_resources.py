@@ -218,7 +218,7 @@ def main() -> int:
     bake_spectra(blob)
     bake_filters(blob)
     n_luts, lut_bytes = bake_print_luts(blob, out)
-    size = blob.write(out / "spektrafilm_constants.bin")
+    size = blob.write(out / "spektralab_constants.bin")
 
     data = Path(__import__("spektrafilm").__file__).parent / "data"
     n_profiles = copy_json(data / "profiles", out / "profiles", "*.json")

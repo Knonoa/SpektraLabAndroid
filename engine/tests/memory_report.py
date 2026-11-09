@@ -14,7 +14,7 @@ Three things it can check, in increasing order of what they cost:
   frame switch   open a big frame, render it, release it, open a small one --
                  and the pool is measured *between* the open and the render,
                  which is the only moment the trim is the last thing that ran.
-  pressure       `SPEKTRAFILM_TEST_PRESSURE` delivers a real event through the
+  pressure       `SPEKTRALAB_TEST_PRESSURE` delivers a real event through the
                  real queue and handler (metal_gpu.cpp); the probe asserts the
                  counters and the flag, and asserts that they are *absent*
                  without the variable.
@@ -135,9 +135,9 @@ def run_pressure_child(size: tuple[int, int], mode: str | None) -> dict:
     render, so the flag has something to be reported by.
     """
     env = dict(os.environ)
-    env.pop("SPEKTRAFILM_TEST_PRESSURE", None)
+    env.pop("SPEKTRALAB_TEST_PRESSURE", None)
     if mode:
-        env["SPEKTRAFILM_TEST_PRESSURE"] = mode
+        env["SPEKTRALAB_TEST_PRESSURE"] = mode
     script = f"""
 import ctypes, json, sys
 sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})
@@ -173,7 +173,7 @@ def main() -> int:
     args = parser.parse_args()
 
     big, small = ((8742, 11656), (4000, 6000)) if args.large else ((1300, 1700), (700, 1000))
-    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektrafilm_engine.dylib'}")
+    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektralab_engine.dylib'}")
     started = time.time()
 
     with spk_ctypes.Engine(dylib=args.dylib) as engine:

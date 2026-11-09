@@ -12,6 +12,7 @@
 // Nothing in here writes a render parameter on its own; `fit()` returns the
 // values and the caller sends them as an ordinary params delta.
 #pragma once
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -62,9 +63,16 @@ struct SceneStats {
     static constexpr int kBins = 128;
     static constexpr double kLo = -16.0, kHi = 16.0;
     std::vector<double> histogram;   // fraction of the frame per quarter stop
+    // RFC-035 §5.2: R, G and B by themselves, on the same bins, each a
+    // fraction of that channel's own positive samples. For the Decode curve's
+    // drawing only; the fit never reads them.
+    std::array<std::vector<double>, 3> channel_histogram;
     size_t samples = 0;
 };
 SceneStats scene_stats(std::vector<double> E);
+// `E` binned as `SceneStats::histogram` is: kBins over [kLo, kHi], clamped
+// into the end bins, each bin the fraction of `E`. Empty `E`, all zeros.
+std::vector<double> stop_histogram(const std::vector<double>& E);
 // The scene's histogram after the curve `p`: each bin's fraction carried to
 // where `mapped` lands it, in eight sub-steps per bin so a compressed range
 // does not quantise into a comb. A curve with both rooms at 0 returns the

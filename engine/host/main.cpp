@@ -33,7 +33,7 @@
 #include "json.hpp"
 #include "output.hpp"
 #include "platform.hpp"
-#include "spektrafilm/spk_engine.h"
+#include "spektralab/spk_engine.h"
 
 #ifndef SPEKTRALAB_HOST_VERSION
 #define SPEKTRALAB_HOST_VERSION "0.1.0"
@@ -1035,7 +1035,7 @@ int main(int argc, char** argv) {
         const std::string& a = args[i];
         const bool has_value = i + 1 < args.size();
         if (a == "--resources" && has_value) resources = args[++i];
-        else if (a == "--device" && has_value) set_env("SPEKTRAFILM_VULKAN_DEVICE", args[++i]);
+        else if (a == "--device" && has_value) set_env("SPEKTRALAB_VULKAN_DEVICE", args[++i]);
         else if (a == "--log-level" && has_value) {
             const std::string& v = args[++i];
             g_log_level = v == "error" ? 0 : v == "debug" ? 2 : 1;

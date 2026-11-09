@@ -2,7 +2,7 @@
 
 核对日期：2026-10-04。作者提供的 `sample_frontend_v4.pdf` 共一页；多数文字是矢量轮廓，以下内容来自渲染后的逐区辨认。浏览器打印日期、页码及文件地址不是应用界面内容。导出页另参考作者提供的 `export_page(1).ai` 的 PDF 兼容内容。
 
-同时读取上游 main 的 **ab5e2d85e2ccef04266ca8ebb2f50af51a5c721c**，没有把整个 main 合并进 Windows 分支。设计稿展示、上游源码实现和 Windows 可用功能分别记录，避免将画出的控件当成已可运行功能。
+同时读取上游 main 的 **unpublished-revision**，没有把整个 main 合并进 Windows 分支。设计稿展示、上游源码实现和 Windows 可用功能分别记录，避免将画出的控件当成已可运行功能。
 
 ## 设计稿文字与模块
 
@@ -28,7 +28,7 @@
 
 ## 对照原版追加的行为
 
-上游 `Import/Library.swift`、`Model/Session.swift`、`Geometry.swift`、`Export/Exporter.swift` 已有多图、单图独立编辑、后置裁切及批量导出。最新的 `b477b12`、`c165e43` 增加全选和设置同步，本轮接入 Windows 的已支持字段。
+上游 `Import/Library.swift`、`Model/Session.swift`、`Geometry.swift`、`Export/Exporter.swift` 已有多图、单图独立编辑、后置裁切及批量导出。最新的 `unpublished-revision`、`unpublished-revision` 增加全选和设置同步，本轮接入 Windows 的已支持字段。
 
 - 当前照片与导出勾选集合分开；切换照片恢复各自参数和裁切。
 - 参数变化自动更新；切换前尚未完成的调整也保留。

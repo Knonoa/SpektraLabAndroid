@@ -196,7 +196,7 @@ def main() -> int:
     h = w = args.height   # square: the pitch depends on the long edge
     img = ripple_frame(h, w)
     counts = [int(c) for c in args.counts.split(",")] + [h]
-    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektrafilm_engine.dylib'}")
+    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektralab_engine.dylib'}")
     print(f"frame {w}x{h}, {len(counts)} strip counts {counts}")
 
     failures = 0

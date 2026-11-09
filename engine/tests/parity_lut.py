@@ -57,7 +57,7 @@ REPO = ENGINE.parent
 # them. Defaulting to `REPO` keeps the old behaviour where it still applies; the
 # override is what makes the harness runnable here at all.
 import os
-REFERENCE = Path(os.environ.get("SPEKTRAFILM_REFERENCE_ROOT", REPO))
+REFERENCE = Path(os.environ.get("SPEKTRALAB_REFERENCE_ROOT", REPO))
 sys.path.insert(0, str(REFERENCE / "src"))
 sys.path.insert(0, str(ENGINE / "tests"))
 

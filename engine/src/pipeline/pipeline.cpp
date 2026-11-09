@@ -288,9 +288,26 @@ bool Pipeline::build(const Params& params, std::string& error) {
     // It replaces the paper exactly as `scan_film` does, and `scan_film` wins.
     // A positive has no mask and no paper, so the switch means nothing there.
     di_active_ = params_.io.digital_intermediate && !params_.io.scan_film && !film.info.is_positive();
-    if (di_active_) {
+    minilab_active_ = false;
+    minilab_table_ = {};
+#ifdef __APPLE__
+    if (!std::getenv("SPK_V2_REFERENCE_OPTICAL") && !di_active_ && !params_.io.scan_film &&
+        !film.info.is_positive() && film.info.channel_model != "monochrome") {
+        MinilabTable table;
+        if (!cache_->minilab().load(film.info.stock, print.info.stock, params_.io.output_color_space, table, error)) return false;
+        if (table.side) {
+            minilab_table_ = gpu_->upload_persistent(table.values.data(), table.values.size() * sizeof(float), error);
+            if (!minilab_table_) return false;
+            minilab_side_ = table.side;
+            std::copy(table.lo, table.lo + 3, minilab_lo_);
+            std::copy(table.inv_span, table.inv_span + 3, minilab_inv_);
+            minilab_active_ = true;
+        }
+    }
+#endif
+    if (di_active_ || minilab_active_) {
         if (!di_constants(*colour_, *blob_, params_, tc_lut_host_, baked_.tc_lut_side, tc_b_host_,
-                          film_sensitivity_, di_, error)) return false;
+                          film_sensitivity_, di_, error, minilab_active_ && !di_active_)) return false;
         const Vec zero(kNumWavelengths, 0.0);
         baked_.di_chd = gpu_->upload_persistent_f32(di_.chd.data(), di_.chd.size(), error);
         baked_.di_zero_base = gpu_->upload_persistent_f32(zero.data(), zero.size(), error);
@@ -448,6 +465,7 @@ bool Pipeline::build(const Params& params, std::string& error) {
     node_count_ += params_.camera.auto_exposure ? 1 : 0;                 // auto_exposure
     node_count_ += 1;                                                    // crop_rescale
     node_count_ += scene_latitude_wanted() ? 1 : 0;                      // RFC-023
+    node_count_ += scene_curve_wanted() ? 1 : 0;                         // the Decode curve
     node_count_ += 1;                                                    // upsample
     node_count_ += 1;                                                    // exposure
     node_count_ += 1;                                                    // boost
@@ -463,9 +481,13 @@ bool Pipeline::build(const Params& params, std::string& error) {
     if (di_active_) {
         node_count_ += 1;                                                // digital_intermediate
     } else {
-    if (!params_.io.scan_film) node_count_ += 3;                         // the printing stage
+    if (!params_.io.scan_film) node_count_ += minilab_active_ ? 1 : 3;                         // the printing stage
     node_count_ += contrast_mask_wanted() ? 1 : 0;                       // RFC-024 analysis
-    node_count_ += 5;                                                    // scan..gamut_compress
+#ifdef __APPLE__
+    node_count_ += params_.io.output_gamut_compress.algorithm == "cam16ucs" ? 4 : 5; // scan..gamut
+#else
+    node_count_ += 5;
+#endif
     node_count_ += params_.print_render.edr_enabled && !params_.io.scan_film ? 1 : 0;
     node_count_ += params_.scanner.lens_blur > 0.0 ? 1 : 0;              // scanner_blur
     node_count_ += (params_.scanner.unsharp_mask[0] > 0.0 &&
@@ -1298,13 +1320,23 @@ bool Pipeline::node_dir_couplers(const Image& cmy, const Image& log_raw, Image& 
         corr = diffused;
     }
 
+#ifdef __APPLE__
+    if (!alloc_like(log_raw, out, error)) return false;
+    const uint32_t meta[2] = {uint32_t(baked_.film_curve_k), uint32_t(log_raw.pixels())};
+    return gpu_->dispatch("spk_dir_finish", {
+        gpu::Arg::buf(log_raw.buf), gpu::Arg::buf(baked_.coupler_curve_x),
+        gpu::Arg::buf(baked_.coupler_curve_inv), gpu::Arg::buf(baked_.coupler_curve_y),
+        gpu::Arg::inline_bytes(meta, 2), gpu::Arg::buf(out.buf), gpu::Arg::buf(corr.buf)
+    }, log_raw.pixels(), error);
+#else
+    // Vulkan keeps its validated kernels until these fusions are ported there.
     double a[3], b[3];
-    fill3(a, 1.0);
-    fill3(b, -1.0);
+    fill3(a, 1.0); fill3(b, -1.0);
     Image log_raw_0;
     if (!blur_.lincomb(log_raw, corr, a, b, log_raw_0, error)) return false;
     return curve_interp(log_raw_0, baked_.coupler_curve_x, baked_.coupler_curve_inv,
                         baked_.coupler_curve_y, baked_.film_curve_k, out, error);
+#endif
 }
 
 // RFC-025's strength, as a mix in density of the grained image over the one
@@ -1737,6 +1769,20 @@ bool Pipeline::node_glare(const Image& in, Image& out, std::string& error) {
                           in.elements(), error);
 }
 
+bool Pipeline::node_minilab(const Image& in, Image& out, std::string& error) {
+    Timer t(this, "printing.minilab");
+    if (!alloc_like(in, out, error)) return false;
+    const uint32_t meta[4] = {uint32_t(in.pixels()), kNumWavelengths, uint32_t(di_.curve.k), minilab_side_};
+    const float ep[6] = {1, 1, 1, 0, 0, 0};
+    return gpu_->dispatch("spk_minilab", {
+        gpu::Arg::buf(in.buf), gpu::Arg::buf(baked_.di_chd), gpu::Arg::buf(baked_.di_zero_base),
+        gpu::Arg::buf(baked_.di_ixs), gpu::Arg::inline_bytes(ep, 6), gpu::Arg::inline_bytes(meta, 4),
+        gpu::Arg::buf(baked_.di_curve_x), gpu::Arg::buf(baked_.di_curve_inv), gpu::Arg::buf(baked_.di_curve_y),
+        gpu::Arg::buf(minilab_table_), gpu::Arg::inline_bytes(minilab_lo_, 3),
+        gpu::Arg::inline_bytes(minilab_inv_, 3), gpu::Arg::buf(out.buf)
+    }, in.pixels(), error);
+}
+
 bool Pipeline::node_xyz_to_rgb(const Image& in, Image& out, std::string& error) {
     Timer t(this, "scanning.xyz_to_rgb");
     return matmul3(in, baked_.xyz_to_rgb, out, error);
@@ -1755,6 +1801,19 @@ bool Pipeline::node_edr(const Image& in, Image& out, std::string& error) {
                            gpu::Arg::buf(baked_.edr_lut), gpu::Arg::inline_bytes(n, 1),
                            gpu::Arg::buf(out.buf)},
                           in.pixels(), error);
+}
+
+bool Pipeline::node_xyz_gamut(const Image& in, Image& out, std::string& error) {
+    Timer t(this, "scanning.xyz_gamut_fused");
+    if (!alloc_like(in, out, error)) return false;
+    const uint32_t meta[4] = {uint32_t(in.pixels()), uint32_t(baked_.cam16_nl),
+                            uint32_t(baked_.cam16_nh), baked_.cam16_lightness ? 1u : 0u};
+    return gpu_->dispatch("spk_xyz_cam16_compress", {
+        gpu::Arg::buf(in.buf), gpu::Arg::buf(baked_.cam16_m2x),
+        gpu::Arg::buf(baked_.cam16_m2r), gpu::Arg::buf(baked_.cam16_cmax),
+        gpu::Arg::buf(baked_.cam16_k), gpu::Arg::inline_bytes(meta, 4),
+        gpu::Arg::buf(out.buf), gpu::Arg::buf(baked_.xyz_to_rgb)
+    }, in.pixels(), error);
 }
 
 bool Pipeline::node_gamut_compress(const Image& in, Image& out, std::string& error) {
@@ -1900,6 +1959,8 @@ bool Pipeline::film_scale_and_expose(const Chain& in, Chain& out, std::string& e
     // spectral reconstruction exactly (§12.2), and this is the band-able
     // stage, so the node strips with it.
     if (scene_latitude_wanted()) { SPK_NODE(node_scene_latitude(cur, next, error)); cur = next; }
+    // The Decode curve: the same axis, the same reasons to sit here.
+    if (scene_curve_wanted()) { SPK_NODE(node_scene_curve(cur, next, error)); cur = next; }
     SPK_NODE(node_upsample(cur, next, error)); cur = next;
     SPK_NODE(node_exposure(cur, next, error)); cur = next;
     out = in;
@@ -1955,6 +2016,29 @@ bool Pipeline::film_blurs(const Chain& in, Chain& out, std::string& error) {
     Image cur = in.cur, next;
     SPK_NODE(node_lens_blur(cur, next, error)); cur = next;
     SPK_NODE(node_halation(cur, next, error)); cur = next;
+    if (factory_exposure_.buf) {
+        // Factory lettering is a separate exposure event. Keep scene spill and
+        // date exposure in the camera path; factory back-return is fixed at 2%.
+        auto& halation = params_.film_render.halation;
+        const auto saved = halation;
+        struct Restore {
+            HalationParams& value;
+            HalationParams saved;
+            ~Restore() { value = saved; }
+        } restore{halation, saved};
+        halation.halation_amount = 1.0;
+        halation.scatter_amount = 1.0;
+        halation.halation_spatial_scale = 1.0;
+        halation.scatter_spatial_scale = 1.0;
+        for (int c = 0; c < 3; ++c) halation.halation_strength[c] *= 0.02;
+        Image factory;
+        if (!node_halation(factory_exposure_, factory, error)) return false;
+        const double one[3] = {1, 1, 1};
+        if (!blur_.lincomb(cur, factory, one, one, next, error)) return false;
+        cur = next;
+    }
+    factory_exposure_ = Image{};
+
     out = in;
     out.cur = cur;
     return true;
@@ -1978,6 +2062,7 @@ bool Pipeline::film_couplers(const Chain& in, Chain& out, std::string& error) {
     SPK_NODE(node_dir_couplers(in.cur, in.log_e_film, next, error));
     out = in;
     out.cur = next;
+    out.log_e_film = Image{}; // DIR was its last consumer; grain only needs CMY.
     return true;
 }
 
@@ -2003,7 +2088,9 @@ bool Pipeline::print_spectral(const Chain& in, Chain& out, std::string& error) {
         out.cur = cur;
         return true;
     }
-    if (!params_.io.scan_film) {
+    if (minilab_active_) {
+        SPK_NODE(node_minilab(cur, next, error)); cur = next;
+    } else if (!params_.io.scan_film) {
         if (mask_on_) { SPK_NODE(node_contrast_mask_epilogue(cur, next, error)); cur = next; }
         else { SPK_NODE(node_enlarger_spectral(cur, next, error)); cur = next; }
         SPK_NODE(node_print_exposure(cur, next, error)); cur = next;
@@ -2025,8 +2112,15 @@ bool Pipeline::print_glare(const Chain& in, Chain& out, std::string& error) {
 bool Pipeline::print_linear(const Chain& in, Chain& out, std::string& error) {
     if (di_active_) { out = in; return true; }   // the DI is already its own encoded output
     Image cur = in.cur, next;
-    SPK_NODE(node_xyz_to_rgb(cur, next, error)); cur = next;
-    SPK_NODE(node_gamut_compress(cur, next, error)); cur = next;
+#ifdef __APPLE__
+    if (params_.io.output_gamut_compress.algorithm == "cam16ucs") {
+        SPK_NODE(node_xyz_gamut(cur, next, error)); cur = next;
+    } else
+#endif
+    {
+        SPK_NODE(node_xyz_to_rgb(cur, next, error)); cur = next;
+        SPK_NODE(node_gamut_compress(cur, next, error)); cur = next;
+    }
     out = in;
     out.cur = cur;
     return true;
@@ -2136,7 +2230,48 @@ std::vector<StripSpan> Pipeline::strip_plan(uint32_t plane_h) const {
     return plan;
 }
 
+bool Pipeline::run_film_checkpoint(const Image& in, Image& out, Image* restored,
+                                   std::optional<double> cached_ev,
+                                   const std::function<void(const Image&, double)>& observe,
+                                   Progress* progress, std::string& error) {
+    struct Cleanup {
+        Image& factory; Progress*& progress;
+        ~Cleanup() { factory = Image{}; progress = nullptr; }
+    } cleanup{factory_exposure_, progress_};
+    if (!built_) { error = "pipeline was not built"; return false; }
+    progress_ = progress;
+    if (progress_) { progress_->total_nodes = node_count_; progress_->fired = 0; }
+    constexpr size_t cut = 6;
+    if (kFilmStageCount <= cut || kFilmStages[cut].run != &Pipeline::film_grain) {
+        error = "pre-grain checkpoint boundary no longer matches the film graph"; return false;
+    }
+    const auto start = std::chrono::steady_clock::now();
+    Chain cur;
+    if (restored) {
+        cur.cur = std::move(*restored);
+        last_ae_ev_ = cached_ev;
+        const auto& grain = params_.film_render.grain;
+        film_seed_ = (grain.active && params_.settings.grain_sampler != "exact") ? fresh_seed() : 0x5EEDu;
+    } else {
+        last_ae_ev_.reset();
+        if (!film_prefix(in, FrameShape{in.h, in.w}, cur.cur, error)) return false;
+    }
+    for (size_t i = restored ? cut : 0; i < kFilmStageCount; ++i) {
+        if (!restored && i == cut && observe) {
+            const double prefix_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            observe(cur.cur, prefix_ms);
+        }
+        Chain next;
+        if (!(this->*kFilmStages[i].run)(cur, next, error)) return false;
+        cur = next;
+    }
+    out = cur.cur;
+    return true;
+}
+
 bool Pipeline::run_film(const Image& in, Image& out, Progress* progress, std::string& error) {
+    struct Cleanup { Image& image; ~Cleanup() { image = Image{}; } } cleanup{factory_exposure_};
+
     if (!built_) { error = "pipeline was not built"; return false; }
     progress_ = progress;
     if (progress_) { progress_->total_nodes = node_count_; progress_->fired = 0; }

@@ -24,16 +24,11 @@
 // 1e-9 there flips gamut decisions; see that file.
 #include "spk_common.h"
 
-kernel void spk_cam16ucs_compress(device const float* rgb [[buffer(0)]],
-                                  device const float* m2x [[buffer(1)]],
-                                  device const float* m2r [[buffer(2)]],
-                                  device const float* cmax [[buffer(3)]],
-                                  device const float* k [[buffer(4)]],
-                                  device const uint* meta [[buffer(5)]],
-                                  device float* out [[buffer(6)]],
-                                  uint3 thread_position_in_grid [[thread_position_in_grid]]) {
-    uint i = thread_position_in_grid.x;
-    if (i >= meta[0]) return;
+// Shared by the original RGB and fused XYZ entry points. Do not compose the
+// matrices: preserving the intermediate float32 operations preserves the image.
+inline void cam16_compress_pixel(float r, float g, float b_, uint i,
+    device const float* m2x, device const float* m2r, device const float* cmax,
+    device const float* k, device const uint* meta, device float* out) {
     const uint nL = meta[1], nh = meta[2], lc_active = meta[3];
     // scalar constants
     const float F_L = k[0], N_bb = k[1], N_cb = k[2], n_ = k[3], z = k[4], A_w = k[5], c_ = k[6], N_c = k[7];
@@ -44,7 +39,6 @@ kernel void spk_cam16ucs_compress(device const float* rgb [[buffer(0)]],
     const float e_c = pow(1.64f - pow(0.29f, n_), 0.73f);
     const float inv_FL4 = pow(F_L, 0.25f);
 
-    float r = rgb[3u * i], g = rgb[3u * i + 1u], b_ = rgb[3u * i + 2u];
     float X = m2x[0] * r + m2x[1] * g + m2x[2] * b_;
     float Y = m2x[3] * r + m2x[4] * g + m2x[5] * b_;
     float Z = m2x[6] * r + m2x[7] * g + m2x[8] * b_;
@@ -168,4 +162,26 @@ kernel void spk_cam16ucs_compress(device const float* rgb [[buffer(0)]],
     out[3u * i]      = m2r[0] * Xn + m2r[1] * Yn + m2r[2] * Zn;
     out[3u * i + 1u] = m2r[3] * Xn + m2r[4] * Yn + m2r[5] * Zn;
     out[3u * i + 2u] = m2r[6] * Xn + m2r[7] * Yn + m2r[8] * Zn;
+}
+
+kernel void spk_cam16ucs_compress(device const float* rgb [[buffer(0)]],
+    device const float* m2x [[buffer(1)]], device const float* m2r [[buffer(2)]],
+    device const float* cmax [[buffer(3)]], device const float* k [[buffer(4)]],
+    device const uint* meta [[buffer(5)]], device float* out [[buffer(6)]],
+    uint i [[thread_position_in_grid]]) {
+    if (i >= meta[0]) return;
+    cam16_compress_pixel(rgb[3u*i], rgb[3u*i+1u], rgb[3u*i+2u], i, m2x, m2r, cmax, k, meta, out);
+}
+
+kernel void spk_xyz_cam16_compress(device const float* rgb [[buffer(0)]],
+    device const float* m2x [[buffer(1)]], device const float* m2r [[buffer(2)]],
+    device const float* cmax [[buffer(3)]], device const float* k [[buffer(4)]],
+    device const uint* meta [[buffer(5)]], device float* out [[buffer(6)]],
+    device const float* conversion [[buffer(7)]], uint i [[thread_position_in_grid]]) {
+    if (i >= meta[0]) return;
+    const float x = rgb[3u*i], y = rgb[3u*i+1u], z = rgb[3u*i+2u];
+    const float r = x*conversion[0] + y*conversion[3] + z*conversion[6];
+    const float g = x*conversion[1] + y*conversion[4] + z*conversion[7];
+    const float b = x*conversion[2] + y*conversion[5] + z*conversion[8];
+    cam16_compress_pixel(r, g, b, i, m2x, m2r, cmax, k, meta, out);
 }

@@ -71,7 +71,7 @@ class LutResult:
 
 def baked_tables(resources):
     # Read the documented blob layout independently of the engine's reader.
-    data = (resources / "spektrafilm_constants.bin").read_bytes()
+    data = (resources / "spektralab_constants.bin").read_bytes()
     magic, version, count, _ = struct.unpack_from("<4sIII", data)
     require(magic == b"SPKR" and version == 1, "unsupported baked blob")
     rows = {}

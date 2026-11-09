@@ -78,6 +78,8 @@ OVERRIDES: dict[str, object] = {
     "scene_latitude_b_shadow_knee": -12.0,
     # The lens's colour filter: a name from `camera_filters.hpp`.
     "camera_filter": "w8",
+    # Five sampled rows: lift RGB while keeping the other four identities.
+    "scene_curve": "0.0625,0.5625,1,0,0.5,1,0,0.5,1,0,0.5,1,0,0.5,1",
 }
 
 # Print-layer fields that nevertheless invalidate cached work. The walk below

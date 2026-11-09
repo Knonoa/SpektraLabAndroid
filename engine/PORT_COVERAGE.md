@@ -7,7 +7,7 @@ by whoever changes a row (`engine/PORT_NOTES.md` is the running log).
 
 Two columns of status:
 
-- **Windows_Port (28a9d7c)** -- the state the clean textual merge of
+- **Windows_Port (unpublished-revision)** -- the state the clean textual merge of
   `origin/Windows_Port` onto main 1.3.1 left (before any Linux work).
 - **Now** -- this branch, as last updated (date in the heading of §5).
 
@@ -28,9 +28,9 @@ commits.
 
 ---
 
-## 1. C ABI (`include/spektrafilm/spk_engine.h`)
+## 1. C ABI (`include/spektralab/spk_engine.h`)
 
-| entry point | Windows_Port (28a9d7c) | Now | notes |
+| entry point | Windows_Port (unpublished-revision) | Now | notes |
 |---|---|---|---|
 | `spk_build_info` | untested | tested (`spk_windows_c_abi`, host `hello`) | reports `math=probed` off Apple |
 | `spk_last_error` | tested | tested | |
@@ -68,7 +68,7 @@ commits.
 | §14 `filter_shift_scale` | `filter_shift_scale` | implemented (portable `printing.cpp`) | implemented, untested here |
 | §15 `camera_filter` (2026-10-07) | `camera_filter` | — | implemented (portable `hanatos.cpp`, `params.cpp`; table in `camera_filters.hpp`), untested here; `desktop/mock-host/schema-fields.json` does not list it yet |
 | `io.digital_intermediate` (Cineon DI file) | | refused | refused |
-| anti-halation switch, highlight boost (9fa3b0d) | `halation`/`boost` fields | implemented via `spk_boost` | implemented, untested here |
+| anti-halation switch, highlight boost (unpublished-revision) | `halation`/`boost` fields | implemented via `spk_boost` | implemented, untested here |
 
 ## 3. Kernels: Metal vs Vulkan
 
@@ -94,17 +94,17 @@ Host-side (C++) dependencies of the unported features: `contrast_mask.cpp`
 uses GCD (`dispatch_apply`); `overscan.cpp` uses CoreText/CoreGraphics for the
 edge print and date back, and vImage for a convolution.
 
-## 4. What main added after 61bfc49 that Vulkan lacks
+## 4. What main added after unpublished-revision that Vulkan lacks
 
 36 commits; the engine ones, and their state off Apple:
 
 | commit(s) | what | off Apple |
 |---|---|---|
-| 9fa3b0d | anti-halation switch, highlight boost | portable (existing kernels) |
-| 2108544, 4a9ea54, 122c5fb, 4767b48, a2f7acb, abc55d5, 8179327, 9cc53c2, 3fe47b5, 079ec29, 25fe66f, b97b7fa, e985110, 75d8eb5, da9ae19 | film edge / overscan: frame number, panoramic formats, carrier, half-frame pair, perforation softness, Fujifilm/Kodak edge print | refused (overscan) |
-| abc55d5, 079ec29 | a pair's second Scene Placement | refused (scene latitude) |
-| 3ec73b2 | date back: date + shooting data, date on 120 | refused (date imprint) |
-| f8223db | Enlarger filters move the print | portable (`printing.cpp`) |
+| unpublished-revision | anti-halation switch, highlight boost | portable (existing kernels) |
+| 2108544, unpublished-revision, unpublished-revision, unpublished-revision, unpublished-revision, unpublished-revision, 8179327, unpublished-revision, unpublished-revision, unpublished-revision, unpublished-revision, unpublished-revision, unpublished-revision, unpublished-revision, unpublished-revision | film edge / overscan: frame number, panoramic formats, carrier, half-frame pair, perforation softness, Fujifilm/Kodak edge print | refused (overscan) |
+| unpublished-revision, unpublished-revision | a pair's second Scene Placement | refused (scene latitude) |
+| unpublished-revision | date back: date + shooting data, date on 120 | refused (date imprint) |
+| unpublished-revision | Enlarger filters move the print | portable (`printing.cpp`) |
 
 The merge is textual; semantic reconciliation of `pipeline.cpp`/`engine.cpp`
 between the two lines is verified only by the CTests named above.
@@ -133,7 +133,7 @@ a GPU that already worked):
 | change | why | where |
 |---|---|---|
 | dispatches past `maxComputeWorkGroupCount[0]` fold into 2D; shaders take `spk_global_index()` | 65535 groups x 256 = 16.7 M threads: every frame over 16.7 MP failed on lavapipe, and on Intel (same limit) | `src/gpu/vulkan_gpu.cpp` `dispatch`, every `src/shaders/vulkan/*.comp` |
-| on a CPU device only, a start-up probe lifts `maxStorageBufferRange` (128 MiB on lavapipe) after proving larger SSBOs read and write correctly | nothing over ~11 MP rendered on the CPU fallback | `vulkan_gpu.cpp` `probe_cpu_storage_range`; off with `SPEKTRAFILM_VULKAN_STRICT_LIMITS=1` |
+| on a CPU device only, a start-up probe lifts `maxStorageBufferRange` (128 MiB on lavapipe) after proving larger SSBOs read and write correctly | nothing over ~11 MP rendered on the CPU fallback | `vulkan_gpu.cpp` `probe_cpu_storage_range`; off with `SPEKTRALAB_VULKAN_STRICT_LIMITS=1` |
 | exact Veltkamp/Dekker `two_prod` when `fma` is unfused (specialization constant 0) | lavapipe's `fma` is mul+add: the IIR blur lost its low word and erred by 0.4 % | `spk_iir_df_acc.comp`, `spk_geometry_resample_df.comp` |
 | resources and SPIR-V opened through UTF-8 wide paths on Windows | an install folder under a non-ASCII user name would not start | `src/core/file_path.hpp`, four `ifstream` sites |
 

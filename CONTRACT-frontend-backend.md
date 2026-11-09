@@ -148,8 +148,8 @@ BE may delete it if it obstructs the rewrite, and should say so.
 ### 4.1 Git: separate worktrees, one base
 
 ```
-/Users/…/spektrafilm            branch  ui/frontend-fixes     ← FE (this checkout)
-/Users/…/spektrafilm-gpu        branch  gpu/native-metal      ← BE (git worktree)
+<checkouts>/spektrafilm         branch  ui/frontend-fixes     ← FE (this checkout)
+<checkouts>/spektrafilm-gpu     branch  gpu/native-metal      ← BE (git worktree)
 ```
 
 Both branch from the commit that adds this file, so both contain it and

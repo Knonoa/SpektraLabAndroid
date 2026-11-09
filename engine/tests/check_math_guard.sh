@@ -32,4 +32,4 @@ if ! grep -q "compiled with fast math" "$out/log"; then
 fi
 echo "ok   the fast-math guard fires on a fast-math library"
 echo "ok   and passes on the shipped one:"
-"$engine/build/gpu_smoke" "$engine/resources/spektrafilm.metallib" | grep "math mode"
+"$engine/build/gpu_smoke" "$engine/resources/spektralab.metallib" | grep "math mode"

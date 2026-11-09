@@ -21,6 +21,7 @@
 // ends. The `session_cache` field stays in `capabilities` so the frontend's
 // status bar keeps working; it reports the sessions currently open.
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -35,7 +36,7 @@
 #include <vector>
 #include <vector>
 
-#include "spektrafilm/spk_engine.h"
+#include "spektralab/spk_engine.h"
 #include "file_path.hpp"
 
 #include "blob.hpp"
@@ -45,6 +46,7 @@
 #include "latitude_fit.hpp"
 #include "params.hpp"
 #include "pipeline.hpp"
+#include "disk_checkpoint.hpp"
 #include "print_lut.hpp"
 #include "setup_cache.hpp"
 #ifndef __APPLE__
@@ -176,6 +178,11 @@ static void apply_product_defaults(Params& params, bool product_defaults) {
 struct spk_session {
     spk_engine* engine = nullptr;
     std::string session_id;
+#ifdef __APPLE__
+    std::string observed_prefix_key;
+    bool checkpoint_after_grain_edit = false;
+    ~spk_session() { DiskCheckpoint::shared().release(session_id); }
+#endif
 
     // The source frame at its own resolution, **on the device**. A tier is
     // built from it lazily and a stock change re-renders from it, so it has to
@@ -343,7 +350,7 @@ struct spk_engine {
 
         Json out = Json::object();
         out.set("version", Json(std::string(spk_build_info())));
-        out.set("engine", Json(std::string("spektrafilm.native")));
+        out.set("engine", Json(std::string("spektralab-engine")));
         out.set("max_mp", Json(double(kMaxFramePixels) / 1e6));
         out.set("max_pixels", Json(double(kMaxFramePixels)));
         out.set("max_texture_dimension_2d", Json(double(gpu ? gpu->max_texture_dimension_2d() : 0)));
@@ -538,10 +545,10 @@ const char* spk_build_info(void) {
     // engine's own version, the compiler date, and the backend math probe.
 #ifndef __APPLE__
     static const std::string info =
-        std::string("spektrafilm-native 0.1.0 (") + __DATE__ " " __TIME__ ", math=probed)";
+        std::string("spektralab-engine 2.0.0 (") + __DATE__ " " __TIME__ ", math=probed)";
 #else
     static const std::string info =
-        std::string("spektrafilm-native 0.1.0 (") + __DATE__ " " __TIME__ ", math=safe)";
+        std::string("spektralab-engine 2.0.0 (") + __DATE__ " " __TIME__ ", math=safe)";
 #endif
     return info.c_str();
 }
@@ -558,9 +565,9 @@ spk_engine* spk_engine_create(const char* resources_dir, void* device) {
     if (!resources_dir) { g_error = "resources_dir is null"; return nullptr; }
     auto engine = std::make_unique<spk_engine>();
     engine->resources_dir = resources_dir;
-
     std::string error;
-    if (!engine->blob.open(engine->resources_dir + "/spektrafilm_constants.bin", error)) {
+    if (!engine->setup_cache.set_resources_dir(engine->resources_dir, error)) { g_error = error; return nullptr; }
+    if (!engine->blob.open(engine->resources_dir + "/spektralab_constants.bin", error)) {
         g_error = error;
         return nullptr;
     }
@@ -581,7 +588,7 @@ spk_engine* spk_engine_create(const char* resources_dir, void* device) {
     if (device) { g_error = "Windows device-buffer input is not implemented yet; pass null"; return nullptr; }
     engine->gpu = gpu::Gpu::create_vulkan(engine->resources_dir + "/vulkan", error);
 #else
-    engine->gpu = gpu::Gpu::create_metal(device, engine->resources_dir + "/spektrafilm.metallib", error);
+    engine->gpu = gpu::Gpu::create_metal(device, engine->resources_dir + "/spektralab.metallib", error);
 #endif
     if (!engine->gpu) { g_error = error; return nullptr; }
 
@@ -1096,7 +1103,54 @@ bool negative_for(spk_session* session, const Tier& tier, Progress* progress, Im
         camera.auto_exposure ? std::optional<double>(session->meter.evs.of(camera.auto_exposure_method))
                              : std::nullopt);
     Image negative;
+#ifdef __APPLE__
+    const char* checkpoint_mode = std::getenv("SPK_CHECKPOINT_MODE");
+    const bool checkpoint_enabled = !session->params.settings.striped &&
+        !(checkpoint_mode && std::strcmp(checkpoint_mode, "off") == 0);
+    if (checkpoint_enabled) {
+        Json key = read_params(session->params);
+        // Reconstruct rather than erase: unknown future fields conservatively
+        // invalidate. In particular scene_curve and halation's zero crossing
+        // are included. Session identity pins the source and loaded resources.
+        Json prefix = Json::object();
+        for (const auto& kv : key.fields()) {
+            if (kv.first != "grain_amount" && kv.first != "grain_active" && kv.first != "grain_sublayers_active")
+                prefix.set(kv.first, kv.second);
+        }
+        prefix.set("tier", Json(std::string(tier.name)));
+        prefix.set("width", Json(double(source.w))); prefix.set("height", Json(double(source.h)));
+        prefix.set("stage", Json(std::string("pre-grain-v1")));
+        const std::string cache_key = prefix.dump();
+        const bool previously_observed = session->observed_prefix_key == cache_key;
+        auto& slot = DiskCheckpoint::shared();
+        Image restored;
+        CheckpointInfo info;
+        const bool hit = slot.restore(session->session_id, cache_key, session->engine->gpu, restored, info);
+        if (hit && !session->pipeline->set_overscan_frame(info.frame_w, info.frame_h, error)) return false;
+        const bool probe = previously_observed && session->checkpoint_after_grain_edit;
+        auto observe = [&](const Image& image, double prefix_ms) {
+            session->observed_prefix_key = cache_key;
+            if (!probe) return;
+            CheckpointInfo saved;
+            saved.w = image.w; saved.h = image.h; saved.prefix_ms = prefix_ms;
+            session->pipeline->overscan_frame(saved.frame_w, saved.frame_h);
+            saved.exposure = session->pipeline->last_auto_exposure_ev();
+            slot.save(session->session_id, cache_key, session->engine->gpu, image, saved);
+        };
+        if (!session->pipeline->run_film_checkpoint(source, negative, hit ? &restored : nullptr,
+                                                   hit ? info.exposure : std::nullopt, observe, progress, error)) {
+            slot.release(session->session_id); return false;
+        }
+        session->checkpoint_after_grain_edit = false;
+    } else {
+        DiskCheckpoint::shared().release(session->session_id);
+        session->observed_prefix_key.clear();
+        session->checkpoint_after_grain_edit = false;
+        if (!run_film_for(session, source, negative, progress, error)) return false;
+    }
+#else
     if (!run_film_for(session, source, negative, progress, error)) return false;
+#endif
     state.applied_ev = session->pipeline->last_auto_exposure_ev();
     session->pipeline->overscan_frame(state.overscan_frame_w, state.overscan_frame_h);
     if (progress) progress->auto_exposure_ev = state.applied_ev;
@@ -1132,6 +1186,25 @@ bool negative_for(spk_session* session, const Tier& tier, Progress* progress, Im
 // anything changing hands. So each render allocates, and the texture's own
 // reference to the buffer is what keeps the pixels alive for exactly as long
 // as the caller is looking at them.
+// Nanoseconds the Mac has been awake. `steady_clock` is `CLOCK_MONOTONIC_RAW`
+// in Apple's libc++, which counts sleep: a render measured across a sleep
+// reads as one that took all night.
+uint64_t awake_ns() {
+#if defined(__APPLE__)
+    return clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+#else
+    return uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+#endif
+}
+
+// What `spk_progress` reports about a finished render's time, beside the
+// result's `elapsed_ms`. After `end_frame`, on the thread that rendered.
+void note_timing(spk_session* session, gpu::Gpu* gpu, uint64_t awake_started) {
+    session->progress.awake_ms = double(awake_ns() - awake_started) / 1e6;
+    session->progress.gpu = gpu->frame_stats();
+}
+
 bool materialise(spk_session* session, const Image& rgb, spk_result* out, std::string& error) {
     gpu::Gpu* gpu = session->engine->gpu;
     const uint32_t align = gpu->texture_row_alignment_px();
@@ -1181,10 +1254,11 @@ spk_status render_tier(spk_session* session, const char* tier_name, bool use_rep
 
     gpu::Gpu* gpu = session->engine->gpu;
     const auto started = std::chrono::steady_clock::now();
+    const uint64_t awake_started = awake_ns();
     session->progress = Progress{};
     session->progress.progress_id = "p" + std::to_string(next_id());
     // Opt-in, because turning it on serialises every node. See Progress.
-    session->progress.detailed = std::getenv("SPEKTRAFILM_NODE_TIMINGS") != nullptr;
+    session->progress.detailed = std::getenv("SPEKTRALAB_NODE_TIMINGS") != nullptr;
 
     gpu->begin_frame();
     // RFC-020 §3.2, after the frame marker so that an event arriving as this
@@ -1229,6 +1303,7 @@ spk_status render_tier(spk_session* session, const char* tier_name, bool use_rep
     }
     out->elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - started).count();
+    note_timing(session, gpu, awake_started);
     out->reprint = use_reprint && had_negative ? 1 : 0;
     out->negative_was_cached = use_reprint && had_negative ? 1 : 0;
     std::snprintf(out->progress_id, sizeof out->progress_id, "%s",
@@ -1493,6 +1568,7 @@ spk_status spk_preview_stock_lut(spk_session* session, const char* print_stock,
 
     gpu::Gpu* gpu = session->engine->gpu;
     const auto started = std::chrono::steady_clock::now();
+    const uint64_t awake_started = awake_ns();
     session->progress = Progress{};
     session->progress.progress_id = "p" + std::to_string(next_id());
 
@@ -1533,6 +1609,7 @@ spk_status spk_preview_stock_lut(spk_session* session, const char* print_stock,
 
     out->elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - started).count();
+    note_timing(session, gpu, awake_started);
     // Reported as a reprint because that is what it is -- the negative was
     // reused and only the print side was replaced.
     out->reprint = 1;
@@ -1566,6 +1643,7 @@ spk_status spk_export_di(spk_session* session, const char* print_stock, spk_resu
 
     gpu::Gpu* gpu = session->engine->gpu;
     const auto started = std::chrono::steady_clock::now();
+    const uint64_t awake_started = awake_ns();
     session->progress = Progress{};
     session->progress.progress_id = "p" + std::to_string(next_id());
 
@@ -1598,6 +1676,7 @@ spk_status spk_export_di(spk_session* session, const char* print_stock, spk_resu
 
     out->elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - started).count();
+    note_timing(session, gpu, awake_started);
     out->reprint = 1;
     out->negative_was_cached = 1;
     std::snprintf(out->progress_id, sizeof out->progress_id, "%s",
@@ -1636,6 +1715,7 @@ spk_status spk_render_digital_intermediate(spk_session* session, spk_result* out
     spk_engine* engine = session->engine;
     gpu::Gpu* gpu = engine->gpu;
     const auto started = std::chrono::steady_clock::now();
+    const uint64_t awake_started = awake_ns();
     session->progress = Progress{};
     session->progress.progress_id = "p" + std::to_string(next_id());
 
@@ -1674,6 +1754,7 @@ spk_status spk_render_digital_intermediate(spk_session* session, spk_result* out
 
     out->elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - started).count();
+    note_timing(session, gpu, awake_started);
     out->reprint = 1;
     out->negative_was_cached = 1;
     std::snprintf(out->progress_id, sizeof out->progress_id, "%s",
@@ -1771,6 +1852,21 @@ spk_status spk_set_params(spk_session* session, const char* params_delta_json, c
         session->pipeline->apply_live_delta(delta);
     }
 
+#ifdef __APPLE__
+    bool only_grain = !delta.fields().empty();
+    for (const auto& kv : delta.fields())
+        if (kv.first != "grain_amount" && kv.first != "grain_active" && kv.first != "grain_sublayers_active") only_grain = false;
+    if (only_grain) {
+        session->checkpoint_after_grain_edit = true;
+    } else if (!delta.fields().empty()) {
+        // A stock reload with the same ID must also invalidate: it may have
+        // loaded a changed profile. No old checkpoint survives a non-grain edit.
+        session->checkpoint_after_grain_edit = false;
+        session->observed_prefix_key.clear();
+        DiskCheckpoint::shared().release(session->session_id);
+    }
+#endif
+
     // `preview_long_edge` is print-layer, but it is not free: the live tier's
     // image and its negative were made at the old edge, and a tier map keyed
     // by name alone would hand them back as if they were the new size. Drop
@@ -1842,6 +1938,20 @@ Params medium_probe_params(const Params& session) {
     p.io.input_cctf_decoding = false;
     p.io.output_cctf_encoding = false;
     p.settings.striped = false;
+    // RFC-035 §5.3: the medium is the film and paper's own, not the person's
+    // edit of the scene. The Decode curve is a choice drawn *against* this
+    // window, so measuring the window through it moved the reference under the
+    // point being dragged (measured 2026-10-25: a +1 stop lift moved both lines
+    // a stop, -4.63/+2.40 -> -5.63/+1.40). And Film Exposure is taken out where
+    // it is a pure shift: with the enlarger not re-timed for it (the product,
+    // `print_exposure_compensation = false`) the window at c is the window at 0
+    // moved by -c to the 1e-4 stop (-4.6277/+2.3976 -> -5.6277/+1.3976), so the
+    // probe runs once per film and paper and the reply shifts it
+    // (`spk_scene_latitude`). With the enlarger re-timed (the reference) c
+    // changes the window's shape, not only its place (-4.63/+2.40 ->
+    // -5.20/+2.37), so there the probe keeps c and the shift is 0.
+    p.camera.scene_curve.clear();
+    if (!p.enlarger.print_exposure_compensation) p.camera.exposure_compensation_ev = 0.0;
     return p;
 }
 
@@ -2037,9 +2147,10 @@ spk_status spk_scene_latitude(spk_session* session, const char* request_json, ch
         if (cache.scene_key != scene_key) {
             Image small;
             std::vector<double> E;
+            std::array<std::vector<double>, 3> channels;
             ok = meter_frame(session, small, error);
             if (ok && base.norm == session->params.camera.scene_latitude.norm) {
-                ok = session->pipeline->scene_latitude_sample(small, ev, E, error, has_region ? region : nullptr);
+                ok = session->pipeline->scene_latitude_sample(small, ev, E, error, has_region ? region : nullptr, &channels);
             } else if (ok) {
                 // The sample reads the norm from its pipeline's params, so a
                 // "what if" on another norm gets a pipeline of its own rather
@@ -2048,10 +2159,12 @@ spk_status spk_scene_latitude(spk_session* session, const char* request_json, ch
                 p.camera.scene_latitude.norm = base.norm;
                 Pipeline sampler(gpu, &session->engine->colour, &session->engine->blob,
                                  &session->engine->setup_cache);
-                ok = sampler.build(p, error) && sampler.scene_latitude_sample(small, ev, E, error, has_region ? region : nullptr);
+                ok = sampler.build(p, error) && sampler.scene_latitude_sample(small, ev, E, error, has_region ? region : nullptr, &channels);
             }
             if (ok) {
                 cache.scene = slm::scene_stats(std::move(E));
+                for (int c = 0; c < 3; ++c)
+                    cache.scene.channel_histogram[size_t(c)] = slm::stop_histogram(channels[size_t(c)]);
                 cache.scene_key = scene_key;
             }
         }
@@ -2060,7 +2173,21 @@ spk_status spk_scene_latitude(spk_session* session, const char* request_json, ch
     if (!ok) { g_error = error; return SPK_ERR_GPU; }
     if (cache.scene.samples == 0) { g_error = "scene latitude: the frame has no positive pixels"; return SPK_ERR_USER; }
 
-    const slm::Medium& medium = cache.medium;
+    // The reply keeps one axis, the node's: stops about the metered mid-grey,
+    // **before** Film Exposure, as the scene statistic is (Scene Placement's
+    // knees are solved on it, here and in the app). The probe ran at
+    // `probe_ev` (0, or c where the enlarger re-times; see
+    // `medium_probe_params`), so the medium on that axis is the probe's moved
+    // by -(c - probe_ev). On the film's own axis -- the Decode curve's
+    // (RFC-035) -- every stop in the reply is `exposure_ev` = c higher.
+    const double exposure_ev = session->params.camera.exposure_compensation_ev;
+    const double probe_ev = medium_probe_params(session->params).camera.exposure_compensation_ev;
+    slm::Medium medium = cache.medium;
+    if (const double shift = probe_ev - exposure_ev; shift != 0.0) {
+        for (double& e : medium.ev) e += shift;
+        medium.shadow_ev += shift;
+        medium.highlight_ev += shift;
+    }
     const slm::SceneStats& scene = cache.scene;
     const slm::Suggestion suggestion = slm::suggest(medium, scene, margin, base, at);
     const double nh = request.at("highlight_pull_back").is_number()
@@ -2096,6 +2223,15 @@ spk_status spk_scene_latitude(spk_session* session, const char* request_json, ch
     hist.set("hi_ev", Json(slm::SceneStats::kHi));
     for (double v : scene.histogram) bins.push(Json(v));
     hist.set("fractions", std::move(bins));
+    // RFC-035 §5.2: each channel's own stops about the same mid-grey, on the
+    // same bins, before Scene Placement (there is no placed form of these).
+    static const char* const kChannelKeys[3] = {"fractions_r", "fractions_g", "fractions_b"};
+    for (int c = 0; c < 3; ++c) {
+        Json row = Json::array();
+        for (double v : scene.channel_histogram[size_t(c)]) row.push(Json(v));
+        hist.set(kChannelKeys[c], std::move(row));
+    }
+    hist.set("exposure_ev", Json(exposure_ev));
     // The same frame after the requested pull-backs (the UI's latitude graph),
     // on the same bins. Absent for a refused fit: there is no curve to show.
     if (f.valid()) {
@@ -2246,6 +2382,14 @@ spk_status spk_progress(spk_session* session, const char* progress_id, char** ou
     // render started. Reported and nothing else -- the mode that would act on
     // it (§4) does not exist yet.
     out.set("memory_pressure_critical", Json(p.memory_pressure_critical));
+    // Additive (2026-10-19): the render's time awake, and its GPU's figures
+    // (`Gpu::FrameStats`). Zero before a render finishes, and from a backend
+    // that does not measure.
+    out.set("awake_ms", Json(p.awake_ms));
+    out.set("gpu_ms", Json(p.gpu.gpu_ms));
+    out.set("gpu_command_buffers", Json(double(p.gpu.command_buffers)));
+    out.set("gpu_wait_ms_max", Json(p.gpu.wait_ms_max));
+    out.set("gpu_queue_ms_max", Json(p.gpu.queue_ms_max));
     // RFC-020 §4, step 4: the plan the executor built and the passes it ran.
     // Only present when the striped path ran, so nothing an existing consumer
     // reads changes. **Not an answer to §10.4** -- that is about whether

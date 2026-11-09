@@ -116,7 +116,7 @@ def read_rgb16_tiff(path: Path, expected_icc: bytes) -> tuple[np.ndarray, dict]:
 def clean_environment() -> dict[str, str]:
     environment = dict(os.environ)
     for key in list(environment):
-        if key.upper().startswith("PYTHON") or key.upper().startswith("SPEKTRAFILM_"):
+        if key.upper().startswith("PYTHON") or key.upper().startswith("SPEKTRALAB_"):
             del environment[key]
     windows = Path(environment.get("SystemRoot", r"C:\Windows"))
     environment["PATH"] = str(windows / "System32") + os.pathsep + str(windows)
@@ -131,7 +131,7 @@ def make_runtime(driver: Path, library: Path, resources: Path, destination: Path
     else:
         require(any(path.name.lower() == library.name.lower() and sha256_file(path) == sha256_file(library)
                     for path in files), "CLI-adjacent engine DLL differs from the selected C ABI oracle")
-    require(any(path.name.lower() == "spektrafilm_engine.dll" for path in files),
+    require(any(path.name.lower() == "spektralab_engine.dll" for path in files),
             "standalone test bundle is missing the C ABI oracle DLL")
     inventory = {}
     for path in files:
@@ -274,7 +274,7 @@ def failure_cases(driver: Path, resources: Path, raw: Path, params: Path,
         ("output_space_conflict", {"output_color_space": "ProPhoto RGB"}),
         ("output_encoding_conflict", {"output_cctf_encoding": False}),
         ("hdr_output_conflict", {"extended_dynamic_range": True}),
-        ("unknown_parameter", {"not_a_spektrafilm_parameter": True}),
+        ("unknown_parameter", {"not_a_spektralab_parameter": True}),
         ("malformed_params", b"{this is invalid JSON"),
         ("nul_in_params", b'{"grain_active":false}\x00'),
         ("non_object_params", b"[]"),

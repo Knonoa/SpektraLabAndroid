@@ -3,6 +3,7 @@
 | | |
 |---|---|
 | **Status** | Reference for implementation. Not a rewrite of the engine — see `PRD-callable-render-api.md` for product rationale, this doc for exact call sequences. |
+| **Which engine** | §1–§10 were written against the Python reference, `src/spektrafilm` (upstream), and its stdio service. From §11 on, the sections are the wire of **the SpektraLab engine** (`engine/`), the C++/Metal implementation derived from spektrafilm by Andrea Volpato (GPL-3.0-or-later), which the app compiles in and calls through the `spk_` C ABI. The rename changed no field, method or ABI symbol. |
 | **Read this if** | You are the session building the Tauri-facing service, or the frontend that calls it. |
 | **Probe evidence** | `tests/baseline/probe_callable_api.py` — run it, results below are from an actual run, 2026-08-25, on the 16 MP reference image. |
 | **Date** | 2026-08-25 |
@@ -574,7 +575,7 @@ the negative: `negative_was_cached` is 1 on the reprint that follows.
 it:** `contrast_mask_edge_aware` (bool) is gone. It is replaced by the
 `contrast_mask_scheme` enum. The guided base behaved like the excluded
 per-pixel arm at its fixed threshold (RFC-024 §12.4), so it is research-only:
-`SPEKTRAFILM_MASK_GUIDED=1`.
+`SPEKTRALAB_MASK_GUIDED=1`.
 
 The scale range narrowed from 0.001–0.25 to 0.002–0.12, for two reasons:
 - Below about 4 ÷ the preview's long edge, the live tier caps the analysis
@@ -611,7 +612,7 @@ shadows. It is sampled at each analysis-grid cell, row-major, `grid_w` ×
 per σ).
 
 - It is exactly what the next print of `tier` applies. On a real frame it was
-  bit-identical to the third plane of `SPEKTRAFILM_MASK_DUMP`.
+  bit-identical to the third plane of `SPEKTRALAB_MASK_DUMP`.
 - It needs the tier's cached negative (render the tier first); otherwise it is
   refused.
 - With the mask off it returns `SPK_OK`, a NULL field and a 0 × 0 grid.
@@ -620,10 +621,10 @@ per σ).
 - The floats are engine-owned and valid until the next call on the session.
 
 Research-only environment switches, off the wire:
-- `SPEKTRAFILM_MASK_DUMP=<file>` writes the analysis grid (`x`, base, δ).
-- `SPEKTRAFILM_MASK_POINTWISE=1` turns the base into each pixel's own `x`,
+- `SPEKTRALAB_MASK_DUMP=<file>` writes the analysis grid (`x`, base, δ).
+- `SPEKTRALAB_MASK_POINTWISE=1` turns the base into each pixel's own `x`,
   which is RFC-024 §9.1's pointwise comparator.
-- `SPEKTRAFILM_MASK_GUIDED=1` selects the self-guided base.
+- `SPEKTRALAB_MASK_GUIDED=1` selects the self-guided base.
 
 ## 12. RFC-023 Scene Latitude — wire fields and `spk_scene_latitude` (2026-09-24)
 
@@ -656,12 +657,33 @@ session's), `margin` (0.25), `shadow_percentile` (0.1 or 1),
 
 - `medium` — `shadow_ev`, `highlight_ev`, `latitude_stops`, `y_black`,
   `y_white`, and a 128-point `ramp_ev`/`ramp_y`: a 1024-sample neutral ramp
-  rendered through the session's own film, paper, enlarger and Exp. Comp.
-  (grain, halation, glare, mask, EDR and crop off), read with ISO 6846's
-  criteria. Cached per session until a field it reads changes.
+  rendered through the session's own film, paper and enlarger (grain,
+  halation, glare, mask, EDR, crop and **the Decode curve** off), read with
+  ISO 6846's criteria. Cached per session until a field it reads changes.
+  **Since 2026-10-25 (RFC-035 §5.3)** the probe also runs at Exp. Comp. 0
+  wherever the enlarger is not re-timed for it (`print_exposure_compensation`
+  false, the product's default): there Exp. Comp. is a pure shift of the
+  window (measured −4.6277/+2.3976 at 0, −5.6277/+1.3976 at +1), so the probe
+  runs once per film and paper and the reply moves it. Where the enlarger is
+  re-timed (the reference's default) Exp. Comp. changes the window's shape
+  (−5.1992/+2.3698 at +1), so the probe keeps it. Either way the reported
+  boundaries are on the same axis as `scene`, below — before Exp. Comp. — and
+  `fit` is solved on them.
 - `scene` — `p0_1`, `p1`, `p50`, `p99`, `p99_9` and a 128-bin `histogram` over
   [−16, 16] EV, on the node's own axis: the meter's frame, through
   input_cast/decode/geometry and the session's auto-exposure EV, in the norm.
+  The histogram carries `lo_ev`, `hi_ev`, `fractions`, `placed_fractions`
+  (present when the fit is valid), and since 2026-10-25 (RFC-035, additive):
+  - `fractions_r`, `fractions_g`, `fractions_b` — each channel by itself,
+    log2(c / mid-grey) on the same bins and the same `lo_ev`/`hi_ev`, each the
+    share of that channel's own positive samples. Before Scene Placement;
+    there is no placed form.
+  - `exposure_ev` — the session's `exposure_compensation_ev`, c. **Every stop
+    in this reply is before Exp. Comp.**: `lo_ev`/`hi_ev`, the percentiles,
+    the medium's boundaries and ramp, the fit. Adding c puts one on the film's
+    axis, the Decode curve's (§17). There the medium's window is the film and
+    paper's own and does not move with Exp. Comp. or the curve, and the
+    scene's histogram moves c stops right.
 - `suggested` — RFC-023 §9.3's policy: pull-backs landing each extreme
   `margin` inside the medium, less margin if needed, `valid` false if none works.
 - `fit` — `valid`, `issues` (refusals: `pull_back_below_minimum`,
@@ -1017,12 +1039,13 @@ an **alias**: `"derived_from": "kodak_vision3_500t"` with only `info` keys of it
 `info` over it (`load_profile`); the neutral print pack falls back to the base's row. The film's
 stock in replies and in the setup cache is `cinestill_800t`.
 
-**A film made with no anti-halation layer** — a profile whose own `antihalation` tag is `no`, today
-only `cinestill_800t` — takes the **back-reflection** halo instead of the reference's three Gaussian
-bounces. **`antihalation_removed` does not select it** (the owner's decision for 1.3.4, carried into
-the 2.0 engine): a film with its layer switched off keeps the reference's Gaussian `no` preset
-(0.30 / 0.10 / 0.015), byte for byte as in 1.3.3, and ignores `halation_headroom_ev`. Extending the
-model to the switch is planned after the owner's test. The base's
+**A film with no anti-halation layer** — a profile whose own `antihalation` tag is `no`
+(`cinestill_800t`), **or any film under `antihalation_removed`** — takes the **back-reflection**
+halo instead of the reference's three Gaussian bounces, and answers `halation_headroom_ev` (the
+owner's decision for 2.0, 2026-10-23). Vision3 500T with its layer switched off renders exactly as
+CineStill 800T. Every film switched off takes CineStill's base geometry and per-layer strengths,
+the only stock they were measured on. **1.3.x differs:** on `release-1.3.4` the switch keeps the
+reference's Gaussian `no` preset (0.30 / 0.10 / 0.015) and ignores the headroom. The base's
 rear face reflects the light the emulsion scatters into it (Fresnel inside the critical angle, all
 of it past 42.5°), and inside it the camera's pressure plate returns 10 % of what leaves the base,
 so a point light exposes a disc with a brighter rim at r_c = 2 d tan θc = 1.83 d, then a cos⁴
@@ -1050,3 +1073,87 @@ knows exactly, and halate at what they are. Measured canvas against export (live
 downscaled): the halo's energy is 0.83–1.01 of the export's (the low end a frame of tiny lights), and the frame's mean difference is no
 larger than plain 500T's. The kernel `spk_highlight_headroom` is Metal only: the Vulkan backend
 refuses a back-reflection film at dispatch.
+
+## 17. `scene_curve` — the Decode curve, a tone curve on the scene before the film (2026-10-24, branch `mac/decode`; axis after Exp. Comp. since 2026-10-25, RFC-035)
+
+Native only; the Python reference has no such stage. String, SHOOT layer (an edit re-develops), not
+live, default `""` (off: the node is not dispatched, and the render is the one without the field, to
+the bit). Declared after `halation_headroom_ev`.
+
+The owner (2026-10-24) asked for a curve "that works similarly as the current curve in edit … but it
+applies straight to the linear tiff", in place of Scene Placement. The host draws it with its Edit
+curve's own data and sends it as a table:
+
+- **The value**: `5n` comma-separated numbers in 0…1, n ≥ 2 — five rows of `n` samples in the order
+  rgb, luma, r, g, b, each row the curve at `i/(n−1)`. The Mac app sends n = 129. Anything else
+  is refused with the field named (`parse_scene_curve`, `params.cpp`).
+- **The axis is stops about mid-grey on the film** — the metered scene *as exposed onto the film*, after
+  Exp. Comp. (RFC-035 §5.3, 2026-10-25; before that it was the scene before Exp. Comp.): the unit
+  square's 0…1 is −8…+8 stops (`kSceneCurveStops`) on both axes, so the film's mid-grey is the centre
+  and the diagonal is no change. A point at +1 is what lands one stop over mid-grey on this film,
+  whatever Exp. Comp. put it there. A host draws `spk_scene_latitude`'s histogram and window on it by
+  adding `scene.histogram.exposure_ev` (§12). A table sent before the change renders the same at Exp.
+  Comp. 0 and moves by c stops otherwise (no version flag: the owner had no frames to keep).
+- **Where**: `node_scene_curve` (`scene_latitude.cpp`, kernel `spk_scene_curve` in
+  `scene_latitude.metal`), after `node_scene_latitude` and before `node_upsample` — after the meter and
+  before Exp. Comp. (`node_exposure`). It is pointwise, so it bands with that stage.
+- **What**: a gain on the linear signal, never a re-encoding. For a value v, E = log2(v / mid-grey)
+  and c = `exposure_compensation_ev`; the row is read at E + c and v is scaled by 2^(f(E + c) − (E + c)).
+  `node_exposure` then multiplies by 2^c, so the film's exposure is exactly f(E + c): the curve applied
+  after Exp. Comp. without moving the node across `node_upsample` (a per-channel gain does not commute
+  with the spectral upsample, so the reorder would change the picture). c reaches the kernel as `p[6]`. Luma first, as one gain on Y (the meter's
+  row) for all three channels; then the rgb row on each channel; then each channel's own row — the
+  order of the app's Layer 2 curve. Past ±8 stops the end's gain holds (slope 1), so the curve never
+  folds a value back. A value that is not positive and finite passes as it came.
+- Not under `debug.lut_mode` (the print LUT bake stands for the paper).
+
+| field | path | type | default | meaning |
+|---|---|---|---|---|
+| `scene_curve` | `camera.scene_curve` | str | `""` | the Decode curve's five-row table, above. Native-only, SHOOT, not live |
+
+Checked (`engine/tests/scene_curve_checks.py`, needs only `build.sh dylib`): `""` equals no field,
+bit for bit; an identity table is no change; an rgb or luma row lifted by one stop renders exactly as
+the input doubled, and a red row as the red input doubled; past +8 stops the end's gain holds; three
+malformed tables are refused. Since RFC-035: under Exp. Comp. +1 a local bump at film stop 0 renders
+exactly as the same bump at Exp. Comp. 0 on the doubled input (red on the pre-change kernel, 0.114);
+the window plus `exposure_ev` is the same at Exp. Comp. 0 and +1, with and without a curve; a neutral
+frame's `fractions_r/g/b` equal its `fractions`, and doubling red moves only `fractions_r`, four bins. The Vulkan backend has no `spk_scene_curve`.
+
+## 18. v2 Mac minilab and lossless execution caches (2026-10-24)
+
+The 100-field wire, ABI and `scene_curve` format are unchanged. For each qualified
+film/paper pair, the Mac engine automatically uses the v2
+minilab print transform: negative CMY → recovered log-positive RGB → 65³
+trilinear paper CMY → the existing scan/output stages. The bundle's
+`minilab/index.json` identifies qualified pairs and the exact profiles/tables.
+The sRGB output selects its sRGB calibration; other supported outputs select
+the ProPhoto calibration and retain their own downstream output transform.
+Unlisted pairs retain optical printing; DI, scan-film, positive and monochrome
+paths retain their existing meanings. Corrupt/missing listed calibration is an
+error, never an implicit optical substitution.
+
+For minilab-qualified rendering, the research transform replaces the optical
+enlarger/exposure/print-curve block. Its enlarger controls (including
+`print_exposure`, filter shifts, preflash, print gamma and contrast mask) remain
+accepted wire fields but do not alter that calibrated block. Film exposure,
+Decode and film effects still operate upstream; scan/output controls still
+operate downstream. The optical paths retain the earlier control semantics.
+The dedicated DI/stock-LUT export APIs still return their own documented
+transforms, not a minilab approximation.
+
+Factory edge lettering is a separate exposure with fixed 2% factory back-return
+and unit effect multipliers. Camera scene spill and date exposure retain the
+camera path. This changes the v1 optical edge model to the approved v2 model;
+performance validation compares against that same v2 model.
+
+Execution may reuse a private lossless float32 pre-grain disk checkpoint. There
+is at most one slot per process (1 GiB including its header), no retained GPU
+checkpoint and no checkpoint write on the first render. A grain-only edit may
+probe admission; actual write/read cost must repay the skipped work. Source
+session identity, tier, dimensions, all fields except the three downstream
+grain controls, and stage version identify the slot. Every non-grain edit
+invalidates it conservatively, including `scene_curve`, stock reloads and
+halation's zero crossing. Session teardown closes the slot; any I/O failure
+falls back to full computation. Striped rendering does not use it.
+`SPK_CHECKPOINT_MODE=off` is a diagnostic forced-full path, not a new wire field.
+`SPK_V2_REFERENCE_OPTICAL=1` is exclusively the old-oracle qualification switch.

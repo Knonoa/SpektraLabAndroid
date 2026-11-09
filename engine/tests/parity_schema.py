@@ -331,6 +331,12 @@ NATIVE_ONLY = {
         "path": "film_render.halation.headroom_ev", "type": "float", "layer": "shoot",
         "default": 4.0, "live": False, "range": [0.0, 8.0],
     },
+    # The Decode curve: a five-row table on Scene Latitude's stop axis (API-SPEC §17).
+    # The reference has no such stage.
+    "scene_curve": {
+        "path": "camera.scene_curve", "type": "str", "layer": "shoot",
+        "default": '', "live": False, "range": None,
+    },
 }
 
 

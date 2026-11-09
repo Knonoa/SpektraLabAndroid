@@ -12,17 +12,17 @@ import sys
 from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parents[1]
-LIBRARY_ENV = "SPEKTRAFILM_ENGINE_LIBRARY"
-RESOURCES_ENV = "SPEKTRAFILM_ENGINE_RESOURCES"
+LIBRARY_ENV = "SPEKTRALAB_ENGINE_LIBRARY"
+RESOURCES_ENV = "SPEKTRALAB_ENGINE_RESOURCES"
 
 
 def default_library() -> Path:
     if sys.platform == "win32":
-        name = "spektrafilm_engine.dll"
+        name = "spektralab_engine.dll"
     elif sys.platform == "darwin":
-        name = "libspektrafilm_engine.dylib"
+        name = "libspektralab_engine.dylib"
     else:
-        name = "libspektrafilm_engine.so"
+        name = "libspektralab_engine.so"
     return ENGINE / "build" / name
 
 

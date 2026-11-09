@@ -233,7 +233,7 @@ def main() -> int:
     args = parser.parse_args()
 
     h, w = (int(v) for v in args.size.split("x"))
-    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektrafilm_engine.dylib'}")
+    print(f"engine: {args.dylib or spk_ctypes.ENGINE / 'build' / 'libspektralab_engine.dylib'}")
     print(f"frame {w}x{h}, one plane {h * w * 3 * 4 / MB:,.1f} MB\n")
 
     with spk_ctypes.Engine(dylib=args.dylib) as engine:

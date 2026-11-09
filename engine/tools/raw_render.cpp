@@ -5,7 +5,7 @@
 #include "io/image_writer.hpp"
 #include "json.hpp"
 #include "params.hpp"
-#include "spektrafilm/spk_engine.h"
+#include "spektralab/spk_engine.h"
 #include <algorithm>
 #include <chrono>
 #include <cstring>

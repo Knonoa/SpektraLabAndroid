@@ -6,7 +6,9 @@ licence the application is distributed under, because a binary that ships
 without them is not licensed to be shipped.
 
   SpektraLab-GPL-3.0.txt
-      The application and the C++ render engine, GPL-3.0-or-later. You have
+      The application and the SpektraLab engine, GPL-3.0-or-later. The
+      SpektraLab engine is a C++/Metal implementation derived from
+      spektrafilm by Andrea Volpato (GPL-3.0-or-later). You have
       the right to the corresponding source code of this application:
       https://github.com/JamesQiu2005/SpektraLab
 

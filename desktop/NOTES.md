@@ -16,7 +16,7 @@ What the finish-up pass added on top of the first pass below:
 - `scripts/package.mjs win` builds natively on Windows (MSVC; for CI).
 - No personal address in `package.json`; the .deb Maintainer is
   "SpektraLab contributors".
-- The staged hosts were current (built from 56f0efe, the latest engine
+- The staged hosts were current (built from unpublished-revision, the latest engine
   commit; `hello.methods` lists `redecode`), so they were not rebuilt.
 - Checks: vitest 51 + 1 env-gated skip, `cargo test` 5, Playwright 6/6.
   Packages rebuilt: .deb 14.5 MB, AppImage 92.3 MB, NSIS setup 10.2 MB

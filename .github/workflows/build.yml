@@ -1,12 +1,15 @@
 # Does a clean checkout build?
 #
 # Deliberately the only thing CI does. The tests run locally before a push
-# (AGENTS.md, "Test gates"): the ones that matter need camera fixtures, a real
-# GPU and the Python oracle, none of which a hosted runner has. What a local
+# (AGENTS.md, "Test gates"): the ones that matter need camera fixtures and the
+# Python oracle, which this CI checkout does not provision. What a local
 # build cannot see is a clean checkout — a file on disk but not committed, a
 # project not regenerated after adding a source file — and that is this job.
 
 name: Build
+
+permissions:
+  contents: read
 
 on:
   push:
@@ -20,25 +23,36 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-26          # arm64; Xcode 26.6 is the image default
+    runs-on: xcode-27          # GitHub's arm64 image with Xcode 27 (public preview); macos-26 has none
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode 26.6
-        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+      # The app needs Xcode 27 or later (README, Build): Xcode 26 gives up type-checking a few of
+      # its expressions. The newest Xcode 27 on the image, or a clear failure (2026-11-08).
+      - name: Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          x=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | grep -v -i -E "candidate|beta" | sort -V | tail -1)
+          if [ -z "$x" ]; then echo "::error::no Xcode 27 on this runner image; the app needs Xcode 27 or later"; exit 1; fi
+          sudo xcode-select -s "$x"
+          xcodebuild -version
 
       # From Xcode 26 the Metal compiler is a separate component.
       - name: Metal toolchain
         run: |
-          xcrun -sdk macosx metal --version \
-            || xcodebuild -downloadComponent MetalToolchain
+          xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
+          xcrun -sdk macosx --find metallib
 
-      - name: Engine kernels and resources
-        run: engine/build.sh bundle
+      # The Mac app is a Mac Catalyst app: its own engine build (engine/ for macabi, safe-math
+      # kernels), its generated project, a Mac Catalyst build.
+      - name: Engine for Mac Catalyst
+        run: app/SpektraLab/tools/build_engine_mac.sh
 
       - name: App
-        working-directory: modern_UI/Spektrafilm
+        working-directory: app/SpektraLab
         run: |
-          xcodebuild -project Spektrafilm.xcodeproj -scheme Spektrafilm \
-            -configuration Debug -derivedDataPath build/DerivedData build
+          python3 gen_project.py
+          xcodebuild -project SpektraLab.xcodeproj -scheme SpektraLab -configuration Debug \
+            -destination 'platform=macOS,variant=Mac Catalyst' -jobs 4 \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" build

@@ -4,6 +4,7 @@
 #include "halation_psf.hpp"
 
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -209,6 +210,10 @@ const SchemaField kFields[] = {
     // back-reflection halo only (a film with no anti-halation layer). Native
     // only, SHOOT, after `camera_filter`. Every film with a layer ignores it.
     {"halation_headroom_ev",     "film_render.halation.headroom_ev",      F, SHOOT, true, 0.0, 8.0, false},
+    // The Decode curve (API-SPEC §17): a table of the scene's tone before the
+    // film, on Scene Latitude's stop axis. Native only, SHOOT, after
+    // `halation_headroom_ev`. "" = off.
+    {"scene_curve",              "camera.scene_curve",                    S, SHOOT, false, 0, 0, false},
     // The app's *preview resolution*: the `live` tier's long edge, and so the
     // size every interactive edit renders at. PRINT layer, because it is a
     // decision about the canvas rather than about the film -- but it is one of
@@ -317,6 +322,7 @@ std::string* str_slot(Params& p, const std::string& path) {
     if (path == "io.output_color_space") return &p.io.output_color_space;
     if (path == "camera.auto_exposure_method") return &p.camera.auto_exposure_method;
     if (path == "camera.filter") return &p.camera.filter;
+    if (path == "camera.scene_curve") return &p.camera.scene_curve;
     if (path == "camera.scene_latitude.norm") return &p.camera.scene_latitude.norm;
     if (path == "print_render.contrast_mask.scheme") return &p.print_render.contrast_mask.scheme;
     if (path == "film_render.overscan.format") return &p.film_render.overscan.format;
@@ -369,6 +375,37 @@ bool is_known_contrast_mask_scheme(const std::string& scheme) { return scheme ==
 
 bool is_known_scene_latitude_norm(const std::string& norm) {
     return norm == "power" || norm == "y" || norm == "max";
+}
+
+bool parse_scene_curve(const std::string& text, std::vector<float>& table, size_t& n, std::string& error) {
+    table.clear();
+    n = 0;
+    if (text.empty()) return true;
+    const char* p = text.c_str();
+    while (*p) {
+        char* end = nullptr;
+        const double v = std::strtod(p, &end);
+        if (end == p || !std::isfinite(v) || v < 0.0 || v > 1.0) {
+            error = "'scene_curve' must be comma-separated numbers in 0..1";
+            table.clear();
+            return false;
+        }
+        table.push_back(float(v));
+        p = end;
+        if (*p == ',') ++p;
+        else if (*p) {
+            error = "'scene_curve' must be comma-separated numbers in 0..1";
+            table.clear();
+            return false;
+        }
+    }
+    if (table.size() % kSceneCurveRows != 0 || table.size() / kSceneCurveRows < 2) {
+        error = "'scene_curve' must hold five rows of at least two samples (rgb, luma, r, g, b)";
+        table.clear();
+        return false;
+    }
+    n = table.size() / kSceneCurveRows;
+    return true;
 }
 
 bool is_known_camera_filter(const std::string& name) {
@@ -451,6 +488,11 @@ bool validate_delta(const Json& delta, std::string& error, std::string& param) {
             error = "'contrast_mask_scheme' = '" + v.as_string() + "' is not a scheme (gaussian)";
             param = kv.first;
             return false;
+        }
+        if (kv.first == "scene_curve") {
+            std::vector<float> table;
+            size_t n = 0;
+            if (!parse_scene_curve(v.as_string(), table, n, error)) { param = kv.first; return false; }
         }
         if (kv.first == "scene_latitude_norm" && !is_known_scene_latitude_norm(v.as_string())) {
             error = "'scene_latitude_norm' = '" + v.as_string() +
@@ -541,24 +583,26 @@ void apply_halation_preset(Params& p) {
     const std::string& use = p.film.info.use;
     const std::string ah = p.film_render.halation.antihalation_removed ? std::string("no")
                                                                        : p.film.info.antihalation;
-    // 1.3.4, the owner's decision: the back-reflection model is the film's own
-    // -- a profile tagged `no` (CineStill 800T) -- and not the switch. A film
-    // with its layer switched off (`antihalation_removed`) keeps the 1.3.3
-    // Gaussian `no` preset, so every saved edit renders as it did.
-    const bool own_no = p.film.info.antihalation == "no";
+    // 2.0 (the owner's decision, 2026-10-23, after 1.3.4 kept it CineStill's
+    // own): a film with no layer is a film with no layer. A profile tagged `no`
+    // (CineStill 800T) and any film whose layer is switched off
+    // (`antihalation_removed`) take the same back-reflection optics and the
+    // same headroom. The base geometry (120 um acetate) and the per-layer
+    // strengths are CineStill's -- the one stock they were measured on; a film
+    // whose own stack differs would want its own (GPT Astra's study, section 5).
+    // 1.3.x keeps the Gaussian `no` preset for the switch (release-1.3.4).
     const double sigma = use == "cine" ? 50.0 : 65.0;
     double s0, s1, s2;
     if (ah == "strong") { s0 = 0.015; s1 = 0.005; s2 = 0.0; }
     else if (ah == "weak") { s0 = 0.08; s1 = 0.02; s2 = 0.0; }
-    else if (ah == "no" && own_no) { s0 = kBackReflectionStrength[0]; s1 = kBackReflectionStrength[1]; s2 = kBackReflectionStrength[2]; }
-    else if (ah == "no") { s0 = 0.30; s1 = 0.10; s2 = 0.015; }
+    else if (ah == "no") { s0 = kBackReflectionStrength[0]; s1 = kBackReflectionStrength[1]; s2 = kBackReflectionStrength[2]; }
     else return;   // an unknown tag leaves the defaults, as the dict lookup does
     if (use != "still" && use != "cine") return;
     set3(p.film_render.halation.halation_first_sigma_um, sigma, sigma, sigma);
     set3(p.film_render.halation.halation_strength, s0, s1, s2);
     // No layer at all: the rear face of the base is a mirror, and the halo is
     // its geometry (`HalationParams::back_reflection`), not a Gaussian guess.
-    p.film_render.halation.back_reflection = own_no;
+    p.film_render.halation.back_reflection = ah == "no";
 }
 
 namespace {

@@ -112,7 +112,7 @@ handled: its `fma` is not fused (the double-float kernels then use an exact
 Dekker product, so results match a fused GPU to the test bounds), and it
 advertises a 128 MiB storage-buffer range (a start-up probe proves larger
 buffers work on this CPU device before the engine uses them;
-`SPEKTRAFILM_VULKAN_STRICT_LIMITS=1` disables that).
+`SPEKTRALAB_VULKAN_STRICT_LIMITS=1` disables that).
 
 ## 5. Running the host
 
@@ -122,7 +122,7 @@ spektralab-host [--resources <engine-dir>] [--device <index>] [--log-level error
 
 - `--resources` defaults to `engine/` beside the executable.
 - `--device` picks a Vulkan physical device by index (otherwise a discrete GPU
-  wins); it sets `SPEKTRAFILM_VULKAN_DEVICE`.
+  wins); it sets `SPEKTRALAB_VULKAN_DEVICE`.
 - stdin/stdout carry the framed protocol; stderr is the log. EOF on stdin or a
   `shutdown` request exits 0.
 

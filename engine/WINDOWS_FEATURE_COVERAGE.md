@@ -1,7 +1,7 @@
 # Windows feature coverage
 
-This table describes the port rooted at upstream `8a318743` and integrated
-with the author's `Windows_Port` starting point `61bfc49`. The acceptance hardware
+This table describes the port rooted at upstream `unpublished-revision` and integrated
+with the author's `Windows_Port` starting point `unpublished-revision`. The acceptance hardware
 was Windows, MinGW GCC 15.2, Vulkan and RTX 5070 Ti. It does not imply that
 every stock, camera, parameter combination or later upstream feature is
 supported. Later features require explicit porting and validation.

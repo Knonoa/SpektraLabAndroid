@@ -11,7 +11,7 @@ Status markers: `[open]`, `[landed <commit>]`, `[declined: reason]`.
 
 ---
 
-## R1 [landed 2e6f1ed] — Export with the app's geometry and Post-Dev (Layer 2)
+## R1 [landed unpublished-revision] — Export with the app's geometry and Post-Dev (Layer 2)
 
 **Why.** On macOS, crop/straighten/turns/flips and the Post-Dev rail (white
 balance on the scan, exposure, curves, colour balance, vignette) are applied
@@ -49,7 +49,7 @@ hands the pixels to `write_image`.
 visible notice when the frame has a crop or Post-Dev edits that the file will
 not carry.
 
-## R2 [landed 950dd47 — white balance + redecode; lens correction declined: LibRaw has no lens profiles] — Camera white balance and lens correction at decode
+## R2 [landed unpublished-revision — white balance + redecode; lens correction declined: LibRaw has no lens profiles] — Camera white balance and lens correction at decode
 
 **Why.** Camera Temperature / Tint / Lens Correction are *decode* settings on
 macOS (`DecodeSettings`, re-decode then render). The protocol's `open.decode`
@@ -65,7 +65,7 @@ Return `unsupported` for any key the decoder cannot honour.
 **Until it lands** the Temperature/Tint/Lens Correction rows are shown disabled
 with the reason "this host cannot change white balance at decode".
 
-## R3 [landed 2e6f1ed] — `thumbnail` honours EXIF orientation
+## R3 [landed unpublished-revision] — `thumbnail` honours EXIF orientation
 
 The filmstrip draws what `thumbnail` returns. Please return it already rotated
 to the camera's orientation (as `open` does for the decode), or report

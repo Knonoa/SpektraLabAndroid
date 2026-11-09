@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
     std::string err;
 
     Blob blob;
-    if (!blob.open(res + "/spektrafilm_constants.bin", err)) die(err);
+    if (!blob.open(res + "/spektralab_constants.bin", err)) die(err);
     Colour colour;
     if (!colour.init(blob, err)) die(err);
 

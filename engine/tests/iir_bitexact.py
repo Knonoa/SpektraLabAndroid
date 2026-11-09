@@ -89,16 +89,16 @@ def main() -> int:
     img = load_frame(args.size)
     print(f"frame {img.shape[1]}x{img.shape[0]} ({img.shape[0] * img.shape[1] / 1e6:.2f} MP)")
     print(f"old: {args.old}")
-    print(f"new: {args.new or spk_ctypes.ENGINE / 'build' / 'libspektrafilm_engine.dylib'}\n")
+    print(f"new: {args.new or spk_ctypes.ENGINE / 'build' / 'libspektralab_engine.dylib'}\n")
 
     # **A dylib and a metallib are a pair.** The kernels live in
-    # `resources/spektrafilm.metallib` and the dylib dispatches them by name, so
+    # `resources/spektralab.metallib` and the dylib dispatches them by name, so
     # an old dylib against a new metallib is not a comparison, it is a crash:
     # the first run of this file died on `no kernel 'spk_transpose3'`, which is
     # the *right* error and a more honest one than a mismatched picture would
     # have been. Each engine is therefore given the resources beside its own
     # build directory.
-    new_path = args.new or spk_ctypes.ENGINE / "build" / "libspektrafilm_engine.dylib"
+    new_path = args.new or spk_ctypes.ENGINE / "build" / "libspektralab_engine.dylib"
     failures = 0
     with spk_ctypes.Engine(dylib=args.old,
                            resources=args.old.parent.parent / "resources") as old, \

@@ -157,7 +157,7 @@ python engine/tools/rawpy_to_f32.py `
     '../samples/sample.ARW' build/validation/input.f32 --downsample 1
 python engine/tools/windows_native_raw.py `
     --driver build/windows/engine/spk_raw_render.exe `
-    --library build/windows/engine/spektrafilm_engine.dll `
+    --library build/windows/engine/spektralab_engine.dll `
     --resources build/windows/engine/resources `
     --input '../samples/sample.ARW' `
     --fixture build/validation/input.f32 `

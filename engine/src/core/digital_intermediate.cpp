@@ -87,6 +87,7 @@ struct FilmHost {
     Vec curves0;    // (K, 3) the curves before DIR couplers, when they are on
     double dir[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
     bool dir_on = false;
+    Vec xs_by_channel[3], normal_by_channel[3], dir_by_channel[3];
 
     FilmHost(const Params& params, const Vec& lut, size_t s, const Mat3& m)
         : p(params), tc_lut(lut), side(s), tc_b(m) {
@@ -102,13 +103,21 @@ struct FilmHost {
             density_curves_before_dir_couplers(film.normalized_curves, film.data.log_exposure, dir,
                                                film.info.is_positive(), curves0);
         }
+        for (int c = 0; c < 3; ++c) {
+            xs_by_channel[c].resize(k);
+            normal_by_channel[c].resize(k);
+            if (dir_on) dir_by_channel[c].resize(k);
+            for (size_t i = 0; i < k; ++i) {
+                xs_by_channel[c][i] = x[3 * i + size_t(c)];
+                normal_by_channel[c][i] = film.normalized_curves[3 * i + size_t(c)];
+                if (dir_on) dir_by_channel[c][i] = curves0[3 * i + size_t(c)];
+            }
+        }
     }
 
     double curve(const Vec& ys, int c, double v) const {
-        const size_t k = p.film.data.n_exposure;
-        std::vector<double> xs(k), yv(k);
-        for (size_t i = 0; i < k; ++i) { xs[i] = x[3 * i + size_t(c)]; yv[i] = ys[3 * i + size_t(c)]; }
-        return interp(v, xs.data(), yv.data(), k);
+        const Vec& values = (&ys == &curves0) ? dir_by_channel[c] : normal_by_channel[c];
+        return interp(v, xs_by_channel[c].data(), values.data(), p.film.data.n_exposure);
     }
 
     // input-space linear RGB -> the film's raw exposure (`node_upsample`)
@@ -170,7 +179,7 @@ void di_linear(const DiConstants& k, const double log_t[3], double lin[3]) {
 
 bool di_constants(const Colour& colour, const Blob& blob, const Params& params,
                   const Vec& tc_lut, size_t side, const Mat3& tc_b, const Vec& film_sensitivity,
-                  DiConstants& out, std::string& error) {
+                  DiConstants& out, std::string& error, bool log_positive_only) {
     const Profile& film = params.film;
     const Profile& paper = params.di_paper;
     out = DiConstants{};
@@ -266,6 +275,8 @@ bool di_constants(const Colour& colour, const Blob& blob, const Params& params,
     // the same on all three. Subtracted, it makes the base black -- Cineon's
     // code 95 -- as the black offset of every Cineon decoder assumes.
     out.positive_floor = std::pow(10.0, out.curve.y[3 * (n - 1) + 1]);
+
+    if (log_positive_only) return true;
 
     // --- the colour step: film RGB -> working RGB --------------------------
     // Least squares over the upsampler's own spectra inside Pointer's gamut,

@@ -150,7 +150,7 @@ def resource_snapshot(directory: Path) -> dict:
     files = {path.relative_to(directory).as_posix():
              {"sha256": sha256_file(path), "byte_count": path.stat().st_size}
              for path in sorted(directory.rglob("*")) if path.is_file()}
-    required = ["spektrafilm_constants.bin", "neutral_print_filters.json", "print_luts.json",
+    required = ["spektralab_constants.bin", "neutral_print_filters.json", "print_luts.json",
                 "profiles/kodak_portra_400.json", "profiles/kodak_portra_endura.json"]
     require(all(name in files for name in required), "required baked resource files are missing")
     # Metal/Vulkan kernels are different artifacts; only the shared baked data
@@ -199,7 +199,7 @@ def run_fixture(driver: Path, resources: Path, fixture_dir: Path, output_dir: Pa
                                                  (driver, resources, fixture_dir, output_dir))
     manifest, params = validate_fixture(fixture_dir)
     require(driver.is_file(), f"driver does not exist: {driver}")
-    dll = driver.parent / "spektrafilm_engine.dll"
+    dll = driver.parent / "spektralab_engine.dll"
     require(dll.is_file(), f"driver DLL must be beside executable: {dll}")
     snapshot = resource_snapshot(resources)
     prior = manifest.get("resource_contract", {}).get("baked_sha256")

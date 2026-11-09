@@ -41,10 +41,14 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - uses: android-actions/setup-android@v3
-
+      # The hosted Ubuntu image ships the Android SDK at $ANDROID_HOME with a
+      # current sdkmanager (android-actions/setup-android@v3 still asks for the
+      # removed `tools` package and fails).
       - name: Android SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1" > /dev/null
+        run: |
+          sdkm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkm" --licenses > /dev/null || true
+          "$sdkm" --install "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1" > /dev/null
 
       - name: LibRaw (pinned snapshot)
         run: bash tools/setup_libraw.sh

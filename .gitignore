@@ -383,3 +383,6 @@ key.properties
 
 # Native Metal pipelines are built for the build host; portable IR remains bundled.
 *.metalar
+
+# ...except the shared *development* key, which is public by design (SpektraDroid/signing/README.md)
+!SpektraDroid/signing/dev.keystore

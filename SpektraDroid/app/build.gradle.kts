@@ -47,6 +47,15 @@ android {
     }
 
     signingConfigs {
+        // Shared development key, committed on purpose (signing/README.md): every
+        // machine's debug build gets the same certificate, so a .dev/.usb build
+        // updates in place across computers. It can only ever sign debug builds.
+        getByName("debug") {
+            storeFile = rootProject.file("signing/dev.keystore")
+            storePassword = "spektralab-dev"
+            keyAlias = "spektralab-dev"
+            keyPassword = "spektralab-dev"
+        }
         create("release") {
             if (releaseSigning.isNotEmpty()) {
                 storeFile = file(releaseSigning.getProperty("storeFile"))

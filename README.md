@@ -20,7 +20,7 @@ An unofficial Android port of [SpektraLab](https://github.com/JamesQiu2005/Spekt
 
 Android **8.0 / API 26 or later**. The universal APK contains **arm64-v8a, armeabi-v7a and x86_64**. Download the APK from [Releases](https://github.com/Knonoa/SpektraLabAndroid/releases), then allow installation from your browser or file manager when Android asks.
 
-**Upgrading from 1.1:** the old public build used a debug certificate whose private key is unavailable in this workspace. Version 1.2 uses a dedicated release signing key. Back up any settings you need and uninstall 1.1 before installing 1.2; uninstalling removes app settings/cache. Future releases must retain the 1.2 signing key to support in-place updates. Existing `.dev` / `.usb` developer builds are separate applications.
+**Signing and upgrades:** from 1.3 on, releases are signed (in GitHub Actions) with the same key as 1.1, so **1.1 updates in place**. 1.2 used a different key: **1.2 users back up any settings they need and uninstall once** before installing 1.3 (uninstalling removes app settings/cache). Existing `.dev` / `.usb` developer builds are separate applications. See [signing](SpektraDroid/signing/README.md).
 
 Version 1.2 uses application ID `com.spektralab.android`, version code `3`, with code shrinking and resource shrinking enabled. Camera permission is requested when opening capture; Android 8–9 also require storage permission to save exports.
 

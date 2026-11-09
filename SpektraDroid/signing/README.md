@@ -3,7 +3,7 @@
 | key | where | signs | secret? |
 |---|---|---|---|
 | **Development** `dev.keystore` | this folder, committed | debug builds only: `com.spektralab.android.dev` / `.usb` | **No — public by design** |
-| **Release** (`CN=Knonoa, OU=SpektraLabAndroid`) | GitHub Actions secrets only | `com.spektralab.android`, published APKs | **Yes — never commit** |
+| **Release** (alias `spektralab-release`, the key of 1.1) | GitHub Actions secrets only | `com.spektralab.android`, published APKs | **Yes — never commit** |
 
 ## Development key / 开发签名
 
@@ -52,6 +52,16 @@ gh secret set ANDROID_KEY_ALIAS -R Knonoa/SpektraLabAndroid
 gh secret set ANDROID_KEY_PASSWORD -R Knonoa/SpektraLabAndroid
 ```
 
+The release key is the one that signed the public **1.1** APK (certificate
+`C=US, O=Android, CN=Android Debug`, SHA-256
+`ba6855f06c3f7ebaeb708761190f3c970ed7b7fbfac283fd463070cedd67f122`, valid to
+2056), re-protected with a strong password under alias `spektralab-release`.
+1.1 installs update in place; 1.2 was signed with a different key, so 1.2
+installs must be uninstalled once before 1.3.
+
+正式密钥即签署公开版 **1.1** 的那把（证书见上，有效期至 2056 年），已改用强密码、别名 `spektralab-release`。
+1.1 用户可直接覆盖升级；1.2 使用了另一把密钥，1.2 用户升级到 1.3 前需卸载一次。
+
 Keep an offline backup of the `.jks` and its passwords (e.g. a password
 manager). If it is lost, no future version can update existing installs.
 
@@ -63,7 +73,7 @@ manager). If it is lost, no future version can update existing installs.
 2. `git tag v<versionName> && git push origin v<versionName>`.
 3. The workflow builds `assembleRelease`, checks the tag matches `versionName`
    and that the APK carries the pinned release certificate
-   (SHA-256 `1fb15d9a…6f6946`), then creates the GitHub Release with
+   (SHA-256 `ba6855f0…67f122`), then creates the GitHub Release with
    `SpektraLab-<version>.apk` and its `.sha256`.
 
 **Actions › Android release › Run workflow** builds and verifies the signed APK

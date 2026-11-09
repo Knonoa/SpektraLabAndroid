@@ -21,9 +21,9 @@ Use restrictive filesystem permissions and back up both the keystore and credent
 
 限制文件访问权限，安全备份密钥和凭据，禁止提交或上传这些文件。后续版本必须沿用相同密钥；缺少配置时正式构建会失败，不会自动改用调试签名。
 
-The 1.1 public APK was debug-signed. Its original key was unavailable when 1.2 was prepared, so 1.2 establishes a dedicated release key. Android rejects an in-place update from 1.1: users must back up settings and uninstall it first. `.dev` and `.usb` builds can coexist.
+From 1.3 on, releases are signed in GitHub Actions with the key that signed 1.1 (certificate SHA-256 `ba6855f0…67f122`, alias `spektralab-release`; see [../signing/README.md](../signing/README.md)). 1.1 installs update in place. 1.2 was signed with a separate key, so Android rejects an in-place update from 1.2: those users back up settings and uninstall once. `.dev` and `.usb` builds can coexist.
 
-1.1 公开 APK 使用调试签名，准备 1.2 时没有原密钥，因此 1.2 使用独立发布密钥。1.1 用户需要先备份设置并卸载旧版，无法直接覆盖安装；`.dev`、`.usb` 开发包可并存。
+自 1.3 起，正式版在 GitHub Actions 中用签署 1.1 的密钥签名（别名 `spektralab-release`，见 [../signing/README.md](../signing/README.md)）。1.1 用户可直接覆盖升级；1.2 使用另一把密钥，1.2 用户需先备份设置并卸载一次。`.dev`、`.usb` 开发包可并存。
 
 ## Build and verify / 构建与检查
 

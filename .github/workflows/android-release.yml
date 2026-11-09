@@ -20,9 +20,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # SHA-256 of the release certificate (CN=Knonoa, OU=SpektraLabAndroid) that
-  # signed 1.2. Every update must carry it, or Android refuses to install it.
-  RELEASE_CERT_SHA256: 1fb15d9a22aee6cefac43561bd11a642d477219c88386d124f4dac09f6ef6946
+  # SHA-256 of the release certificate (the key that signed the public 1.1,
+  # alias spektralab-release). Every update must carry it, or Android refuses
+  # to install it over an existing copy.
+  RELEASE_CERT_SHA256: ba6855f06c3f7ebaeb708761190f3c970ed7b7fbfac283fd463070cedd67f122
 
 jobs:
   release:
